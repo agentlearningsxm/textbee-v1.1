@@ -21,6 +21,7 @@ import { BatchResponse } from 'firebase-admin/messaging'
 
 // Mock firebase-admin
 jest.mock('firebase-admin', () => ({
+  apps: [{ name: '[DEFAULT]' }],
   messaging: jest.fn().mockReturnValue({
     sendEach: jest.fn(),
   }),
@@ -298,7 +299,7 @@ describe('GatewayService', () => {
       const result = await service.deleteDevice(mockDeviceId)
 
       expect(mockDeviceModel.findById).toHaveBeenCalledWith(mockDeviceId)
-      expect(result).toEqual({})
+      expect(result).toEqual({ message: 'Device deleted successfully' })
     })
 
     it('should throw an error if device does not exist', async () => {
