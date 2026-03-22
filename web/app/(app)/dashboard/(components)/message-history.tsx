@@ -44,6 +44,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/hooks/use-toast'
+import { formatError } from '@/lib/utils/errorHandler'
+import { formatRateLimitMessageForToast } from '@/components/shared/rate-limit-error'
+import { formatDeviceName } from '@/lib/utils'
 
 
 // Helper function to format timestamps
@@ -115,9 +118,14 @@ function ReplyDialog({ sms, onClose, open, onOpenChange }: { sms: any; onClose?:
       }, 1500)
     },
     onError: (error: any) => {
+      const formattedError = formatError(error)
+      const description = formattedError.isRateLimit
+        ? formatRateLimitMessageForToast(formattedError.rateLimitData)
+        : formattedError.message || 'Please try again.'
       toast({
         title: 'Failed to send SMS.',
-        description: error.response?.data?.message || 'Please try again.',
+        description,
+        variant: 'destructive',
       })
     },
   })
@@ -185,7 +193,7 @@ function ReplyDialog({ sms, onClose, open, onOpenChange }: { sms: any; onClose?:
                     <SelectContent>
                       {devices?.data?.map((device: any) => (
                         <SelectItem key={device._id} value={device._id}>
-                          {device.brand} {device.model}{' '}
+                          {formatDeviceName(device)}{' '}
                           {device.enabled ? '' : '(disabled)'}
                         </SelectItem>
                       ))}
@@ -264,9 +272,14 @@ function FollowUpDialog({ message, onClose, open, onOpenChange }: { message: any
       }, 1500)
     },
     onError: (error: any) => {
+      const formattedError = formatError(error)
+      const description = formattedError.isRateLimit
+        ? formatRateLimitMessageForToast(formattedError.rateLimitData)
+        : formattedError.message || 'Please try again.'
       toast({
         title: 'Failed to send follow-up SMS.',
-        description: error.response?.data?.message || 'Please try again.',
+        description,
+        variant: 'destructive',
       })
     },
   })
@@ -345,7 +358,7 @@ function FollowUpDialog({ message, onClose, open, onOpenChange }: { message: any
                     <SelectContent>
                       {devices?.data?.map((device: any) => (
                         <SelectItem key={device._id} value={device._id}>
-                          {device.brand} {device.model}{' '}
+                          {formatDeviceName(device)}{' '}
                           {device.enabled ? '' : '(disabled)'}
                         </SelectItem>
                       ))}
@@ -458,8 +471,8 @@ function SmsDetailsDialog({
           </DialogHeader>
 
           <div className="mt-4 space-y-4 text-sm">
-            {/* Info Grid */}
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+            {/* Info Grid - labels 1/3, values 2/3 */}
+            <div className="grid grid-cols-[1fr_2fr] gap-x-6 gap-y-3">
               <div className="font-medium text-muted-foreground">Direction</div>
               <div className="flex items-center gap-1">
                 {isSent ? <ArrowUpRight className="h-4 w-4 text-brand-500" /> :
@@ -493,17 +506,38 @@ function SmsDetailsDialog({
               {message.gatewayMessageId && (
                 <>
                   <div className="font-medium text-muted-foreground">Gateway ID</div>
-                  <div className="font-mono text-xs break-all">{message.gatewayMessageId}</div>
-                </>
-              )}
-
-              {message.errorMessage && (
-                <>
-                  <div className="font-medium text-muted-foreground">Error</div>
-                  <div className="text-destructive text-sm">{message.errorMessage}</div>
+                  <div className="font-mono text-xs break-all min-w-0">{message.gatewayMessageId}</div>
                 </>
               )}
             </div>
+
+            {/* Error details - full width, multi-line, contained */}
+            {(message.errorCode || message.errorMessage) && (
+              <div className="pt-3 border-t border-border space-y-2 min-w-0">
+                {message.errorCode && (
+                  <div className="min-w-0">
+                    <div className="font-medium text-muted-foreground mb-0.5">Error code</div>
+                    <div
+                      className="w-full min-w-0 max-h-24 overflow-y-auto overflow-x-hidden text-destructive text-sm break-words rounded p-2 bg-destructive/5"
+                      title={message.errorCode}
+                    >
+                      {message.errorCode}
+                    </div>
+                  </div>
+                )}
+                {message.errorMessage && (
+                  <div className="min-w-0">
+                    <div className="font-medium text-muted-foreground mb-0.5">Error message</div>
+                    <div
+                      className="w-full min-w-0 max-h-32 overflow-y-auto overflow-x-hidden text-destructive text-sm break-words rounded p-2 bg-destructive/5"
+                      title={message.errorMessage}
+                    >
+                      {message.errorMessage}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Message Body */}
             <div className="pt-4 border-t border-border">
@@ -776,7 +810,7 @@ export default function MessageHistory() {
                     <SelectItem key={device._id} value={device._id}>
                       <div className='flex items-center gap-2'>
                         <span className='font-medium'>
-                          {device.brand} {device.model}
+                          {formatDeviceName(device)}
                         </span>
                         {!device.enabled && (
                           <Badge

@@ -1,8 +1,8 @@
 export const ExternalLinks = {
-  patreon: 'https://patreon.com/vernu',
-  github: 'https://github.com/vernu/textbee',
+  patreon: 'https://github.com/agentlearningsxm/textbee-cloud',
+  github: 'https://github.com/agentlearningsxm/textbee-cloud',
   discord: 'https://discord.gg/d7vyfBpWbQ',
-  polar: 'https://donate.textbee.dev',
-  twitter: 'https://x.com/textbeedotdev',
-  linkedin: 'https://www.linkedin.com/company/textbeedotdev',
+  polar: 'https://github.com/agentlearningsxm/textbee-cloud',
+  twitter: 'https://github.com/agentlearningsxm/textbee-cloud',
+  linkedin: 'https://github.com/agentlearningsxm/textbee-cloud',
 }

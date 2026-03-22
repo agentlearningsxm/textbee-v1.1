@@ -1,5 +1,6 @@
 package com.vernu.sms.services;
 
+import android.app.ForegroundServiceStartNotAllowedException;
 import android.app.*;
 import android.content.Context;
 import android.content.Intent;
@@ -70,8 +71,14 @@ public class StickyNotificationService extends Service {
 
         // Start as foreground service with notification
         Notification notification = createNotification();
-        startForeground(1, notification);
-        Log.i(TAG, "Started foreground service with sticky notification");
+        try {
+            startForeground(1, notification);
+            Log.i(TAG, "Started foreground service with sticky notification");
+        } catch (ForegroundServiceStartNotAllowedException e) {
+            Log.w(TAG, "Cannot start foreground from background, stopping service: " + e.getMessage());
+            stopSelf();
+            return START_NOT_STICKY;
+        }
 
         // Handle alarm-triggered poll
         if (intent != null && AlarmReceiver.ACTION_POLL_SMS.equals(intent.getAction())) {

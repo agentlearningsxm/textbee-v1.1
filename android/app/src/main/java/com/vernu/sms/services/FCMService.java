@@ -16,9 +16,11 @@ import com.google.gson.Gson;
 import com.vernu.sms.AppConstants;
 import com.vernu.sms.R;
 import com.vernu.sms.activities.MainActivity;
-import com.vernu.sms.helpers.SMSHelper;
 import com.vernu.sms.helpers.SharedPreferenceHelper;
+import com.vernu.sms.helpers.HeartbeatHelper;
+import com.vernu.sms.helpers.HeartbeatManager;
 import com.vernu.sms.models.SMSPayload;
+import com.vernu.sms.workers.SmsSendWorker;
 import com.vernu.sms.dtos.RegisterDeviceInputDTO;
 import com.vernu.sms.dtos.RegisterDeviceResponseDTO;
 import com.vernu.sms.ApiManager;
@@ -36,7 +38,16 @@ public class FCMService extends FirebaseMessagingService {
         Log.d(TAG, remoteMessage.getData().toString());
 
         try {
-            // Parse SMS payload data
+            // Check message type first
+            String messageType = remoteMessage.getData().get("type");
+            
+            if ("heartbeat_check".equals(messageType)) {
+                // Handle heartbeat check request from backend
+                handleHeartbeatCheck();
+                return;
+            }
+
+            // Parse SMS payload data (legacy handling)
             Gson gson = new Gson();
             SMSPayload smsPayload = gson.fromJson(remoteMessage.getData().get("smsData"), SMSPayload.class);
 
@@ -55,7 +66,47 @@ public class FCMService extends FirebaseMessagingService {
     }
 
     /**
-     * Send SMS to recipients using the provided payload
+     * Handle heartbeat check request from backend
+     */
+    private void handleHeartbeatCheck() {
+        Log.d(TAG, "Received heartbeat check request from backend");
+        
+        // Check if device is eligible for heartbeat
+        if (!HeartbeatHelper.isDeviceEligibleForHeartbeat(this)) {
+            Log.d(TAG, "Device not eligible for heartbeat, skipping heartbeat check");
+            return;
+        }
+
+        // Get device ID and API key
+        String deviceId = SharedPreferenceHelper.getSharedPreferenceString(
+            this,
+            AppConstants.SHARED_PREFS_DEVICE_ID_KEY,
+            ""
+        );
+
+        String apiKey = SharedPreferenceHelper.getSharedPreferenceString(
+            this,
+            AppConstants.SHARED_PREFS_API_KEY_KEY,
+            ""
+        );
+
+        // Send heartbeat using shared helper
+        boolean success = HeartbeatHelper.sendHeartbeat(this, deviceId, apiKey);
+
+        if (success) {
+            Log.d(TAG, "Heartbeat sent successfully in response to backend check");
+            // Ensure scheduled work is added if missing
+            HeartbeatManager.scheduleHeartbeat(this);
+        } else {
+            Log.e(TAG, "Failed to send heartbeat in response to backend check");
+            // Still try to ensure scheduled work is added
+            HeartbeatManager.scheduleHeartbeat(this);
+        }
+    }
+
+    /**
+     * Enqueue SMS to recipients via the device-side send queue.
+     * SIM resolution and rate limiting are handled by SmsSendWorker.
      */
     private void sendSMS(SMSPayload smsPayload) {
         if (smsPayload == null) {
@@ -63,64 +114,19 @@ public class FCMService extends FirebaseMessagingService {
             return;
         }
 
-        // Get preferred SIM
-        int preferredSim = SharedPreferenceHelper.getSharedPreferenceInt(
-                this, AppConstants.SHARED_PREFS_PREFERRED_SIM_KEY, -1);
-        
-        // Check if SMS payload contains valid recipients
         String[] recipients = smsPayload.getRecipients();
         if (recipients == null || recipients.length == 0) {
             Log.e(TAG, "No recipients found in SMS payload");
             return;
         }
-        
-        // Send SMS to each recipient
-        boolean atLeastOneSent = false;
-        int sentCount = 0;
-        int failedCount = 0;
-        
+
         for (String recipient : recipients) {
-            boolean smsSent;
-            
-            // Try to send using default or specific SIM based on preference
-            if (preferredSim == -1) {
-                // Use default SIM
-                smsSent = SMSHelper.sendSMS(
-                    recipient, 
-                    smsPayload.getMessage(), 
-                    smsPayload.getSmsId(), 
-                    smsPayload.getSmsBatchId(), 
-                    this
-                );
-            } else {
-                // Use specific SIM
-                try {
-                    smsSent = SMSHelper.sendSMSFromSpecificSim(
-                        recipient, 
-                        smsPayload.getMessage(), 
-                        preferredSim, 
-                        smsPayload.getSmsId(), 
-                        smsPayload.getSmsBatchId(), 
-                        this
-                    );
-                } catch (Exception e) {
-                    Log.e(TAG, "Error sending SMS from specific SIM: " + e.getMessage());
-                    smsSent = false;
-                }
-            }
-            
-            // Track sent and failed counts
-            if (smsSent) {
-                sentCount++;
-                atLeastOneSent = true;
-            } else {
-                failedCount++;
-            }
+            SmsSendWorker.enqueue(this, recipient, smsPayload.getMessage(),
+                    smsPayload.getSmsId(), smsPayload.getSmsBatchId(),
+                    smsPayload.getSimSubscriptionId());
         }
-        
-        // Log summary
-        Log.d(TAG, "SMS sending complete - Batch: " + smsPayload.getSmsBatchId() + 
-              ", Sent: " + sentCount + ", Failed: " + failedCount);
+
+        Log.d(TAG, "Enqueued " + recipients.length + " SMS for sending - Batch: " + smsPayload.getSmsBatchId());
     }
 
     @Override

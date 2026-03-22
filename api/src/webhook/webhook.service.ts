@@ -13,10 +13,12 @@ import {
 import axios from 'axios'
 import { v4 as uuidv4 } from 'uuid'
 import { Cron } from '@nestjs/schedule'
-import { CronExpression } from '@nestjs/schedule'
 import * as crypto from 'crypto'
 import mongoose from 'mongoose'
-import { SMS } from 'src/gateway/schemas/sms.schema'
+import { SMS } from '../gateway/schemas/sms.schema'
+import { WebhookQueueService } from './queue/webhook-queue.service'
+import { MailService } from '../mail/mail.service'
+import { UsersService } from '../users/users.service'
 
 @Injectable()
 export class WebhookService {
@@ -25,6 +27,9 @@ export class WebhookService {
     private webhookSubscriptionModel: Model<WebhookSubscriptionDocument>,
     @InjectModel(WebhookNotification.name)
     private webhookNotificationModel: Model<WebhookNotificationDocument>,
+    private webhookQueueService: WebhookQueueService,
+    private mailService: MailService,
+    private usersService: UsersService,
   ) {}
 
   async findOne({ user, webhookId }) {
@@ -320,14 +325,20 @@ export class WebhookService {
       throw new HttpException('Invalid event type', HttpStatus.BAD_REQUEST)
     }
 
-      
-    let payload: Record<string, any>= {
+    // Generate idempotency key
+    const idempotencyKey = uuidv4()
+
+    // Store delivery URL snapshot for debugging
+    const deliveryUrlSnapshot = webhookSubscription.deliveryUrl
+
+    let payload: Record<string, any> = {
       smsId: sms._id,
       message: sms.message,
       deviceId: sms.device,
       webhookSubscriptionId: webhookSubscription._id,
       webhookEvent: event,
-    };
+      idempotencyKey,
+    }
 
     switch (event) {
       case WebhookEvent.MESSAGE_RECEIVED:
@@ -335,8 +346,8 @@ export class WebhookService {
           ...payload,
           sender: sms.sender,
           receivedAt: sms.receivedAt,
-        };
-        break;
+        }
+        break
 
       case WebhookEvent.MESSAGE_DELIVERED:
         payload = {
@@ -346,8 +357,8 @@ export class WebhookService {
           recipient: sms.recipient,
           sentAt: sms.sentAt,
           deliveredAt: sms.deliveredAt,
-        };
-        break;
+        }
+        break
 
       case WebhookEvent.MESSAGE_SENT:
         payload = {
@@ -356,8 +367,8 @@ export class WebhookService {
           status: sms.status,
           recipient: sms.recipient,
           sentAt: sms.sentAt,
-        };
-        break;
+        }
+        break
 
       case WebhookEvent.MESSAGE_FAILED:
         payload = {
@@ -368,8 +379,8 @@ export class WebhookService {
           errorCode: sms.errorCode,
           errorMessage: sms.errorMessage,
           failedAt: sms.failedAt,
-        };
-        break;
+        }
+        break
 
       case WebhookEvent.UNKNOWN_STATE:
         payload = {
@@ -377,26 +388,37 @@ export class WebhookService {
           smsBatchId: sms.smsBatch,
           status: sms.status,
           recipient: sms.recipient,
-        };
-        break;
+        }
+        break
     }
 
-      const webhookNotification = await this.webhookNotificationModel.create({
-        webhookSubscription: webhookSubscription._id,
-        event,
-        payload,
-        sms,
-      })
+    const webhookNotification = await this.webhookNotificationModel.create({
+      webhookSubscription: webhookSubscription._id,
+      event,
+      payload,
+      sms,
+      idempotencyKey,
+      deliveryUrl: deliveryUrlSnapshot,
+    })
 
-      await this.attemptWebhookDelivery(webhookNotification)  
+    // Queue job instead of synchronous delivery
+    await this.webhookQueueService.addWebhookDeliveryJob(
+      webhookNotification._id.toString(),
+    )
   }
 
-  private async attemptWebhookDelivery(
-    webhookNotification: WebhookNotificationDocument,
-  ) {
+  async attemptWebhookDelivery(notificationId: string) {
     const now = new Date()
-    const webhookSubscriptionId = webhookNotification.webhookSubscription
+    const webhookNotification = await this.webhookNotificationModel.findById(
+      notificationId,
+    )
 
+    if (!webhookNotification) {
+      console.log(`Webhook notification not found for ${notificationId}`)
+      return
+    }
+
+    const webhookSubscriptionId = webhookNotification.webhookSubscription
     const webhookSubscription = await this.webhookSubscriptionModel.findById(
       webhookSubscriptionId,
     )
@@ -423,39 +445,99 @@ export class WebhookService {
       .update(JSON.stringify(webhookNotification.payload))
       .digest('hex')
 
+    let httpStatusCode: number | undefined
+    let responseBody: string | undefined
+    let errorType: 'retryable' | 'non-retryable' | undefined
+
+    const deliveryTimeoutMs = Math.min(
+      60000,
+      Math.max(10000, parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS ?? '30000', 10) || 30000),
+    )
+
     try {
-      await axios.post(deliveryUrl, webhookNotification.payload, {
+      const response = await axios.post(deliveryUrl, webhookNotification.payload, {
         headers: {
           'X-Signature': signature,
         },
-        timeout: 10000,
+        timeout: deliveryTimeoutMs,
       })
+
+      httpStatusCode = response.status
+      responseBody = typeof response.data === 'string' 
+        ? response.data.substring(0, 1000)
+        : JSON.stringify(response.data).substring(0, 1000)
+
       webhookNotification.deliveryAttemptCount += 1
       webhookNotification.lastDeliveryAttemptAt = now
       webhookNotification.nextDeliveryAttemptAt = this.getNextDeliveryAttemptAt(
         webhookNotification.deliveryAttemptCount,
       )
       webhookNotification.deliveredAt = now
+      webhookNotification.httpStatusCode = httpStatusCode
+      webhookNotification.responseBody = responseBody
       await webhookNotification.save()
 
-      webhookSubscription.successfulDeliveryCount += 1
-      webhookSubscription.lastDeliverySuccessAt = now
-    } catch (e) {
-      console.log(
-        `Failed to deliver webhook notification: ID ${webhookNotification._id}, status code: ${e.response?.status}, message: ${e.message}`,
+      await this.webhookSubscriptionModel.updateOne(
+        { _id: webhookSubscriptionId },
+        {
+          $inc: { successfulDeliveryCount: 1, deliveryAttemptCount: 1 },
+          $set: { lastDeliverySuccessAt: now },
+        },
       )
+    } catch (e) {
+      // Classify error type
+      if (e.response?.status) {
+        httpStatusCode = e.response.status
+        responseBody = typeof e.response.data === 'string'
+          ? e.response.data.substring(0, 1000)
+          : JSON.stringify(e.response.data || {}).substring(0, 1000)
+
+        // 4xx errors are non-retryable, 5xx are retryable
+        if (e.response.status >= 400 && e.response.status < 500) {
+          errorType = 'non-retryable'
+        } else if (e.response.status >= 500) {
+          errorType = 'retryable'
+        }
+      } else {
+        // Network/timeout errors are retryable
+        errorType = 'retryable'
+        responseBody = e.message?.substring(0, 1000)
+      }
+
       webhookNotification.deliveryAttemptCount += 1
       webhookNotification.lastDeliveryAttemptAt = now
-      webhookNotification.nextDeliveryAttemptAt = this.getNextDeliveryAttemptAt(
-        webhookNotification.deliveryAttemptCount,
-      )
+      webhookNotification.httpStatusCode = httpStatusCode
+      webhookNotification.responseBody = responseBody
+      webhookNotification.errorType = errorType
+
+      // For 4xx errors, mark as abandoned after 3rd attempt
+      if (errorType === 'non-retryable' && webhookNotification.deliveryAttemptCount >= 3) {
+        webhookNotification.deliveryAttemptAbortedAt = now
+        webhookNotification.nextDeliveryAttemptAt = undefined
+      } else if (errorType === 'retryable' && webhookNotification.deliveryAttemptCount < 10) {
+        // For retryable errors, schedule next attempt
+        webhookNotification.nextDeliveryAttemptAt = this.getNextDeliveryAttemptAt(
+          webhookNotification.deliveryAttemptCount,
+        )
+      } else {
+        // Max attempts reached
+        webhookNotification.deliveryAttemptAbortedAt = now
+        webhookNotification.nextDeliveryAttemptAt = undefined
+      }
+
       await webhookNotification.save()
 
-      webhookSubscription.deliveryFailureCount += 1
-      webhookSubscription.lastDeliveryFailureAt = now
-    } finally {
-      webhookSubscription.deliveryAttemptCount += 1
-      await webhookSubscription.save()
+      await this.webhookSubscriptionModel.updateOne(
+        { _id: webhookSubscriptionId },
+        {
+          $inc: { deliveryFailureCount: 1, deliveryAttemptCount: 1 },
+          $set: { lastDeliveryFailureAt: now },
+        },
+      )
+
+      console.log(
+        `Failed to deliver webhook notification: ID ${webhookNotification._id}, status code: ${httpStatusCode}, error type: ${errorType}, message: ${e.message}`,
+      )
     }
   }
 
@@ -483,30 +565,268 @@ export class WebhookService {
     return new Date(Date.now() + delayInMinutes * 60 * 1000)
   }
 
-  // Check for notifications that need to be delivered every 3 minutes
-  @Cron('0 */3 * * * *', {
-    disabled: process.env.NODE_ENV !== 'production',
-  })
+  // Check for notifications that need to be delivered every 5 minutes
+  @Cron('0 */5 * * * *')
   async checkForNotificationsToDeliver() {
     const now = new Date()
-    const notifications = await this.webhookNotificationModel
-      .find({
-        nextDeliveryAttemptAt: { $lte: now },
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000)
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+
+    // Mark notifications older than one month as aborted so they are no longer retried
+    await this.webhookNotificationModel.updateMany(
+      {
+        nextDeliveryAttemptAt: { $lte: fiveMinutesAgo },
         deliveredAt: null,
         deliveryAttemptCount: { $lt: 10 },
         deliveryAttemptAbortedAt: null,
+        createdAt: { $lt: oneMonthAgo },
+      },
+      { $set: { deliveryAttemptAbortedAt: now } },
+    )
+
+    const notifications = await this.webhookNotificationModel
+      .find({
+        nextDeliveryAttemptAt: { $lte: fiveMinutesAgo },
+        deliveredAt: null,
+        deliveryAttemptCount: { $lt: 10 },
+        deliveryAttemptAbortedAt: null,
+        createdAt: { $gte: oneMonthAgo },
       })
       .sort({ nextDeliveryAttemptAt: 1 })
-      .limit(30)
+      .limit(200)
 
     if (notifications.length === 0) {
       return
     }
 
-    console.log(`delivering ${notifications.length} webhook notifications`)
+    console.log(`Queueing ${notifications.length} webhook notifications for retry`)
 
     for (const notification of notifications) {
-      await this.attemptWebhookDelivery(notification)
+      await this.webhookQueueService.addWebhookDeliveryJob(
+        notification._id.toString(),
+      )
+    }
+  }
+
+  private getAutoDisableConfig(): {
+    threshold: number
+    lookbackDays: number
+    minFailureRate: number
+  } {
+    const threshold = Math.max(
+      1,
+      parseInt(process.env.WEBHOOK_AUTO_DISABLE_FAILURE_THRESHOLD ?? '50', 10) || 50,
+    )
+    const lookbackDays = Math.max(
+      1,
+      Math.min(
+        365,
+        parseInt(process.env.WEBHOOK_AUTO_DISABLE_LOOKBACK_DAYS ?? '30', 10) || 30,
+      ),
+    )
+    const minFailureRate = Math.min(
+      1,
+      Math.max(
+        0.01,
+        parseFloat(process.env.WEBHOOK_AUTO_DISABLE_MIN_FAILURE_RATE ?? '0.50') || 0.5,
+      ),
+    )
+    return { threshold, lookbackDays, minFailureRate }
+  }
+
+  @Cron('0 6 * * *')
+  async autoDisableSubscriptionsWithHighFailureRate() {
+    const { threshold, lookbackDays, minFailureRate } = this.getAutoDisableConfig()
+    const now = new Date()
+    const since = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000)
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+    const subscriptionCounts = await this.webhookNotificationModel.aggregate<{
+      _id: mongoose.Types.ObjectId
+      count: number
+    }>([
+      {
+        $addFields: {
+          _finalizedAt: {
+            $ifNull: ['$lastDeliveryAttemptAt', '$createdAt'],
+          },
+        },
+      },
+      {
+        $match: {
+          deliveredAt: null,
+          _finalizedAt: { $gte: since },
+          $or: [
+            { deliveryAttemptAbortedAt: { $ne: null } },
+            { deliveryAttemptCount: { $gte: 10 } },
+          ],
+        },
+      },
+      { $group: { _id: '$webhookSubscription', count: { $sum: 1 } } },
+      { $match: { count: { $gte: threshold } } },
+    ])
+
+    if (subscriptionCounts.length === 0) {
+      return
+    }
+
+    const subscriptionIds = subscriptionCounts.map((s) => s._id)
+    const failureCountBySubscriptionId = new Map(
+      subscriptionCounts.map((s) => [s._id.toString(), s.count]),
+    )
+
+    const successCounts = await this.webhookNotificationModel.aggregate<{
+      _id: mongoose.Types.ObjectId
+      count: number
+    }>([
+      {
+        $match: {
+          webhookSubscription: { $in: subscriptionIds },
+          deliveredAt: { $ne: null, $gte: since },
+        },
+      },
+      { $group: { _id: '$webhookSubscription', count: { $sum: 1 } } },
+    ])
+    const successCountBySubscriptionId = new Map(
+      successCounts.map((s) => [s._id.toString(), s.count]),
+    )
+
+    const subscriptionsToDisable: { subscriptionId: string; failureCount: number; successCount: number; totalAttempts: number; failureRatePercent: number }[] = []
+    for (const s of subscriptionCounts) {
+      const sid = s._id.toString()
+      const failureCount = failureCountBySubscriptionId.get(sid) ?? 0
+      const successCount = successCountBySubscriptionId.get(sid) ?? 0
+      const totalAttempts = failureCount + successCount
+      const failureRate = totalAttempts > 0 ? failureCount / totalAttempts : 0
+      if (failureRate >= minFailureRate) {
+        const failureRatePercent = Math.round(failureRate * 100)
+        subscriptionsToDisable.push({
+          subscriptionId: sid,
+          failureCount,
+          successCount,
+          totalAttempts,
+          failureRatePercent,
+        })
+      }
+    }
+
+    if (subscriptionsToDisable.length === 0) {
+      return
+    }
+
+    const subscriptionIdSet = new Set(subscriptionsToDisable.map((s) => s.subscriptionId))
+    const activeSubscriptions = await this.webhookSubscriptionModel.find({
+      _id: { $in: subscriptionIds.filter((id) => subscriptionIdSet.has(id.toString())) },
+      isActive: true,
+    })
+
+    const ctaUrlBase = process.env.FRONTEND_URL || 'https://app.textbee.dev'
+    const disabledInThisRun: {
+      subscriptionId: string
+      deliveryUrl: string
+      failureCount: number
+      successCount: number
+      totalAttempts: number
+      failureRatePercent: number
+      lookbackDays: number
+      userName: string
+      userEmail: string
+    }[] = []
+
+    for (const subscription of activeSubscriptions) {
+      const stats = subscriptionsToDisable.find(
+        (s) => s.subscriptionId === subscription._id.toString(),
+      )
+      if (!stats) continue
+
+      if (subscription?.lastDeliverySuccessAt >= twentyFourHoursAgo) {
+        continue
+      }
+
+      const { failureCount, successCount, totalAttempts, failureRatePercent } = stats
+      const noteText = `Auto-disabled: ${failureCount} failed and ${successCount} succeeded (${totalAttempts} total) in the last ${lookbackDays} days — failure rate ${failureRatePercent}%. Re-enable in dashboard when your endpoint is ready.`
+      const noteEntry = { at: new Date(), text: noteText }
+
+      const result = await this.webhookSubscriptionModel.updateOne(
+        { _id: subscription._id, isActive: true },
+        {
+          $set: { isActive: false },
+          $push: { notes: noteEntry },
+        },
+      )
+
+      if (result.modifiedCount === 0) {
+        continue
+      }
+
+      const user = await this.usersService.findOne({
+        _id: subscription.user,
+      })
+
+      disabledInThisRun.push({
+        subscriptionId: subscription._id.toString(),
+        deliveryUrl: subscription.deliveryUrl ?? '',
+        failureCount,
+        successCount,
+        totalAttempts,
+        failureRatePercent,
+        lookbackDays,
+        userName: user?.name ?? '—',
+        userEmail: user?.email ?? '—',
+      })
+
+      if (!user?.email) {
+        console.log(
+          `Webhook subscription ${subscription._id} auto-disabled but no user/email to notify`,
+        )
+        continue
+      }
+
+      try {
+        await this.mailService.sendEmailFromTemplate({
+          to: user.email,
+          subject: 'Your webhook was paused – textbee',
+          template: 'webhook-subscription-disabled',
+          context: {
+            name: user.name?.split(' ')?.[0] || 'there',
+            title: 'Your webhook was paused',
+            failureCount,
+            successCount,
+            totalAttempts,
+            failureRatePercent,
+            lookbackDays,
+            ctaUrl: `${ctaUrlBase}/dashboard/account`,
+            ctaLabel: 'Re-enable in dashboard',
+            brandName: 'textbee.dev',
+          },
+        })
+      } catch (e) {
+        console.log(
+          `Failed to send webhook-disabled email to ${user.email}:`,
+          e,
+        )
+      }
+    }
+
+    const adminEmail = process.env.ADMIN_EMAIL
+    if (disabledInThisRun.length > 0 && adminEmail) {
+      const runAt = now.toISOString()
+      try {
+        await this.mailService.sendEmailFromTemplate({
+          to: adminEmail,
+          subject: `Webhook auto-disable: ${disabledInThisRun.length} subscription(s) – ${runAt.slice(0, 10)}`,
+          template: 'webhook-auto-disable-admin-summary',
+          context: {
+            title: 'Webhook auto-disable summary',
+            runAt,
+            count: disabledInThisRun.length,
+            disabledList: disabledInThisRun,
+            brandName: 'textbee.dev',
+          },
+        })
+      } catch (e) {
+        console.log(`Failed to send webhook auto-disable admin summary to ${adminEmail}:`, e)
+      }
     }
   }
 }

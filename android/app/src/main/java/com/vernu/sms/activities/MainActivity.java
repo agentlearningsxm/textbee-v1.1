@@ -7,8 +7,13 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import com.vernu.sms.activities.SMSFilterActivity;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -30,9 +35,14 @@ import com.vernu.sms.TextBeeUtils;
 import com.vernu.sms.R;
 import com.vernu.sms.dtos.RegisterDeviceInputDTO;
 import com.vernu.sms.dtos.RegisterDeviceResponseDTO;
+import com.vernu.sms.dtos.SimInfoCollectionDTO;
 import com.vernu.sms.helpers.SharedPreferenceHelper;
 import com.vernu.sms.helpers.VersionTracker;
+import com.vernu.sms.helpers.HeartbeatManager;
 import com.google.firebase.crashlytics.FirebaseCrashlytics;
+import com.google.gson.Gson;
+import okhttp3.ResponseBody;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
 import retrofit2.Call;
@@ -43,13 +53,16 @@ public class MainActivity extends AppCompatActivity {
 
     private Context mContext;
     private Switch gatewaySwitch, receiveSMSSwitch, stickyNotificationSwitch;
-    private EditText apiKeyEditText, fcmTokenEditText, deviceIdEditText;
-    private Button registerDeviceBtn, grantSMSPermissionBtn, scanQRBtn, checkUpdatesBtn;
+    private EditText apiKeyEditText, fcmTokenEditText, deviceIdEditText, deviceNameEditText, smsSendDelayEditText;
+    private Button registerDeviceBtn, grantSMSPermissionBtn, scanQRBtn, checkUpdatesBtn, configureFilterBtn;
     private ImageButton copyDeviceIdImgBtn;
     private TextView deviceBrandAndModelTxt, deviceIdTxt, appVersionNameTxt, appVersionCodeTxt;
     private RadioGroup defaultSimSlotRadioGroup;
     private static final int SCAN_QR_REQUEST_CODE = 49374;
     private static final int PERMISSION_REQUEST_CODE = 0;
+    private static final long SMS_DELAY_SAVE_DEBOUNCE_MS = 3000L;
+    private final Handler smsDelaySaveHandler = new Handler(Looper.getMainLooper());
+    private Runnable smsDelaySaveRunnable;
     private String deviceId = null;
     private static final String TAG = "MainActivity";
 
@@ -66,6 +79,7 @@ public class MainActivity extends AppCompatActivity {
         apiKeyEditText = findViewById(R.id.apiKeyEditText);
         fcmTokenEditText = findViewById(R.id.fcmTokenEditText);
         deviceIdEditText = findViewById(R.id.deviceIdEditText);
+        deviceNameEditText = findViewById(R.id.deviceNameEditText);
         registerDeviceBtn = findViewById(R.id.registerDeviceBtn);
         grantSMSPermissionBtn = findViewById(R.id.grantSMSPermissionBtn);
         scanQRBtn = findViewById(R.id.scanQRButton);
@@ -76,6 +90,8 @@ public class MainActivity extends AppCompatActivity {
         appVersionNameTxt = findViewById(R.id.appVersionNameTxt);
         appVersionCodeTxt = findViewById(R.id.appVersionCodeTxt);
         checkUpdatesBtn = findViewById(R.id.checkUpdatesBtn);
+        configureFilterBtn = findViewById(R.id.configureFilterBtn);
+        smsSendDelayEditText = findViewById(R.id.smsSendDelayEditText);
 
         deviceIdTxt.setText(deviceId);
         deviceIdEditText.setText(deviceId);
@@ -107,6 +123,12 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "Starting sticky notification service on app start");
         }
 
+        // Schedule heartbeat if device is enabled and registered
+        if (gatewayEnabled && !deviceId.isEmpty()) {
+            HeartbeatManager.scheduleHeartbeat(mContext);
+            Log.d(TAG, "Scheduling heartbeat on app start");
+        }
+
         if (deviceId == null || deviceId.isEmpty()) {
             registerDeviceBtn.setText("Register");
         } else {
@@ -134,6 +156,12 @@ public class MainActivity extends AppCompatActivity {
         });
 
         apiKeyEditText.setText(SharedPreferenceHelper.getSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_API_KEY_KEY, ""));
+        String storedDeviceName = SharedPreferenceHelper.getSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_NAME_KEY, "");
+        if (storedDeviceName.isEmpty()) {
+            deviceNameEditText.setText(Build.BRAND + " " + Build.MODEL);
+        } else {
+            deviceNameEditText.setText(storedDeviceName);
+        }
         gatewaySwitch.setChecked(SharedPreferenceHelper.getSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, false));
         gatewaySwitch.setOnCheckedChangeListener((compoundButton, isCheked) -> {
             View view = compoundButton.getRootView();
@@ -151,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
                 public void onResponse(Call<RegisterDeviceResponseDTO> call, Response<RegisterDeviceResponseDTO> response) {
                     Log.d(TAG, response.toString());
                     if (!response.isSuccessful()) {
-                        Snackbar.make(view, response.message().isEmpty() ? "An error occurred :( "+ response.code() : response.message(), Snackbar.LENGTH_LONG).show();
+                        Snackbar.make(view, extractErrorMessage(response), Snackbar.LENGTH_LONG).show();
                         compoundButton.setEnabled(true);
                         return;
                     }
@@ -164,8 +192,12 @@ public class MainActivity extends AppCompatActivity {
                         if (SharedPreferenceHelper.getSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false)) {
                             TextBeeUtils.startStickyNotificationService(mContext);
                         }
+                        // Schedule heartbeat
+                        HeartbeatManager.scheduleHeartbeat(mContext);
                     } else {
                         TextBeeUtils.stopStickyNotificationService(mContext);
+                        // Cancel heartbeat
+                        HeartbeatManager.cancelHeartbeat(mContext);
                     }
                     compoundButton.setEnabled(true);
                 }
@@ -226,6 +258,68 @@ public class MainActivity extends AppCompatActivity {
             Intent browserIntent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl));
             startActivity(browserIntent);
         });
+
+        configureFilterBtn.setOnClickListener(view -> {
+            Intent filterIntent = new Intent(MainActivity.this, SMSFilterActivity.class);
+            startActivity(filterIntent);
+        });
+
+        // SMS Send Delay setting: save 3 seconds after user stops typing
+        int currentDelay = SharedPreferenceHelper.getSharedPreferenceInt(
+                mContext, AppConstants.SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY, AppConstants.DEFAULT_SMS_SEND_DELAY_SECONDS);
+        smsSendDelayEditText.setText(String.valueOf(currentDelay));
+        smsDelaySaveRunnable = this::saveSendDelay;
+        smsSendDelayEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                smsDelaySaveHandler.removeCallbacks(smsDelaySaveRunnable);
+                smsDelaySaveHandler.postDelayed(smsDelaySaveRunnable, SMS_DELAY_SAVE_DEBOUNCE_MS);
+            }
+        });
+        smsSendDelayEditText.setOnEditorActionListener((v, actionId, event) -> {
+            smsDelaySaveHandler.removeCallbacks(smsDelaySaveRunnable);
+            saveSendDelay();
+            return false;
+        });
+    }
+
+    private void saveSendDelay() {
+        String text = smsSendDelayEditText.getText().toString().trim();
+        if (text.isEmpty()) {
+            int defaultDelay = AppConstants.DEFAULT_SMS_SEND_DELAY_SECONDS;
+            smsSendDelayEditText.setText(String.valueOf(defaultDelay));
+            SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY, defaultDelay);
+            Snackbar.make(smsSendDelayEditText, "SMS send delay saved (" + defaultDelay + " sec)", Snackbar.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            int value = Integer.parseInt(text);
+            if (value < 0) {
+                value = 0;
+                smsSendDelayEditText.setText("0");
+                SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY, 0);
+                Snackbar.make(smsSendDelayEditText, "Minimum delay is 0 seconds. Saved.", Snackbar.LENGTH_SHORT).show();
+            } else if (value > 3600) {
+                value = 3600;
+                smsSendDelayEditText.setText("3600");
+                SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY, 3600);
+                Snackbar.make(smsSendDelayEditText, "Maximum delay is 3600 seconds. Saved.", Snackbar.LENGTH_SHORT).show();
+            } else {
+                SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY, value);
+                Snackbar.make(smsSendDelayEditText, "SMS send delay saved (" + value + " sec)", Snackbar.LENGTH_SHORT).show();
+            }
+        } catch (NumberFormatException e) {
+            int defaultDelay = AppConstants.DEFAULT_SMS_SEND_DELAY_SECONDS;
+            smsSendDelayEditText.setText(String.valueOf(defaultDelay));
+            SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY, defaultDelay);
+            Snackbar.make(smsSendDelayEditText, "Invalid value. Reset to " + defaultDelay + " sec.", Snackbar.LENGTH_SHORT).show();
+        }
     }
 
     private void renderAvailableSimOptions() {
@@ -245,7 +339,8 @@ public class MainActivity extends AppCompatActivity {
             
             // Create radio buttons for each SIM with proper styling
             TextBeeUtils.getAvailableSimSlots(mContext).forEach(subscriptionInfo -> {
-                String simInfo = "SIM " + (subscriptionInfo.getSimSlotIndex() + 1) + " (" + subscriptionInfo.getDisplayName() + ")";
+                String displayName = subscriptionInfo.getDisplayName() != null ? subscriptionInfo.getDisplayName().toString() : "Unknown";
+                String simInfo = displayName + " (Subscription ID: " + subscriptionInfo.getSubscriptionId() + ")";
                 RadioButton radioButton = new RadioButton(mContext);
                 radioButton.setText(simInfo);
                 radioButton.setId(subscriptionInfo.getSubscriptionId());
@@ -278,6 +373,44 @@ public class MainActivity extends AppCompatActivity {
             Snackbar.make(defaultSimSlotRadioGroup.getRootView(), "Error: " + e.getMessage(), Snackbar.LENGTH_LONG).show();
             Log.e(TAG, "SIM_SLOT_ERROR "+ e.getMessage());
         }
+    }
+    
+    /**
+     * Extracts error message from API response, trying multiple sources:
+     * 1. Error message from response body (error field)
+     * 2. Response message from HTTP headers
+     * 3. Generic error with status code as fallback
+     */
+    private String extractErrorMessage(Response<?> response) {
+        // Try to parse error from response body
+        try {
+            ResponseBody errorBody = response.errorBody();
+            if (errorBody != null) {
+                String errorBodyString = errorBody.string();
+                if (errorBodyString != null && !errorBodyString.isEmpty()) {
+                    try {
+                        Gson gson = new Gson();
+                        RegisterDeviceResponseDTO errorResponse = gson.fromJson(errorBodyString, RegisterDeviceResponseDTO.class);
+                        if (errorResponse != null && errorResponse.error != null && !errorResponse.error.isEmpty()) {
+                            return errorResponse.error;
+                        }
+                    } catch (Exception e) {
+                        // If JSON parsing fails, try to extract message from raw string
+                        Log.d(TAG, "Could not parse error response as JSON: " + errorBodyString);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            Log.d(TAG, "Could not read error body: " + e.getMessage());
+        }
+        
+        // Fall back to response message
+        if (response.message() != null && !response.message().isEmpty()) {
+            return response.message();
+        }
+        
+        // Final fallback to generic error with status code
+        return "An error occurred :( " + response.code();
     }
     
     /**
@@ -364,6 +497,19 @@ public class MainActivity extends AppCompatActivity {
                     registerDeviceInput.setAppVersionCode(BuildConfig.VERSION_CODE);
                     registerDeviceInput.setAppVersionName(BuildConfig.VERSION_NAME);
                     
+                    // Get device name from input field or default to "brand model"
+                    String deviceName = deviceNameEditText.getText().toString().trim();
+                    if (deviceName.isEmpty()) {
+                        deviceName = Build.BRAND + " " + Build.MODEL;
+                    }
+                    registerDeviceInput.setName(deviceName);
+                    
+                    // Collect SIM information
+                    SimInfoCollectionDTO simInfoCollection = new SimInfoCollectionDTO();
+                    simInfoCollection.setLastUpdated(System.currentTimeMillis());
+                    simInfoCollection.setSims(TextBeeUtils.collectSimInfo(mContext));
+                    registerDeviceInput.setSimInfo(simInfoCollection);
+                    
                     // If the user provided a device ID, use it for updating instead of creating new
                     if (!deviceIdInput.isEmpty()) {
                         Log.d(TAG, "Updating device with deviceId: "+ deviceIdInput);
@@ -373,7 +519,7 @@ public class MainActivity extends AppCompatActivity {
                             public void onResponse(Call<RegisterDeviceResponseDTO> call, Response<RegisterDeviceResponseDTO> response) {
                                 Log.d(TAG, response.toString());
                                 if (!response.isSuccessful()) {
-                                    Snackbar.make(view, response.message().isEmpty() ? "An error occurred :( "+ response.code() : response.message(), Snackbar.LENGTH_LONG).show();
+                                    Snackbar.make(view, extractErrorMessage(response), Snackbar.LENGTH_LONG).show();
                                     registerDeviceBtn.setEnabled(true);
                                     registerDeviceBtn.setText("Update");
                                     return;
@@ -389,6 +535,29 @@ public class MainActivity extends AppCompatActivity {
                                     SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_ID_KEY, deviceId);
                                     SharedPreferenceHelper.setSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, registerDeviceInput.isEnabled());
                                     gatewaySwitch.setChecked(registerDeviceInput.isEnabled());
+                                    
+                                    // Sync heartbeatIntervalMinutes from server response
+                                    if (response.body().data.get("heartbeatIntervalMinutes") != null) {
+                                        Object intervalObj = response.body().data.get("heartbeatIntervalMinutes");
+                                        if (intervalObj instanceof Number) {
+                                            int intervalMinutes = ((Number) intervalObj).intValue();
+                                            SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_HEARTBEAT_INTERVAL_MINUTES_KEY, intervalMinutes);
+                                            Log.d(TAG, "Synced heartbeat interval from server: " + intervalMinutes + " minutes");
+                                        }
+                                    }
+                                    
+                                    // Sync device name from server response
+                                    if (response.body().data.get("name") != null) {
+                                        String deviceName = response.body().data.get("name").toString();
+                                        SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_NAME_KEY, deviceName);
+                                        deviceNameEditText.setText(deviceName);
+                                        Log.d(TAG, "Synced device name from server: " + deviceName);
+                                    }
+                                    
+                                    // Schedule heartbeat if device is enabled
+                                    if (registerDeviceInput.isEnabled()) {
+                                        HeartbeatManager.scheduleHeartbeat(mContext);
+                                    }
                                 }
                                 
                                 // Update stored version information
@@ -412,18 +581,18 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     Call<RegisterDeviceResponseDTO> apiCall = ApiManager.getApiService().registerDevice(newKey, registerDeviceInput);
-                    apiCall.enqueue(new Callback<RegisterDeviceResponseDTO>() {
-                        @Override
-                        public void onResponse(Call<RegisterDeviceResponseDTO> call, Response<RegisterDeviceResponseDTO> response) {
-                            Log.d(TAG, response.toString());
-                            if (!response.isSuccessful()) {
-                                Snackbar.make(view, response.message().isEmpty() ? "An error occurred :( "+ response.code() : response.message(), Snackbar.LENGTH_LONG).show();
-                                registerDeviceBtn.setEnabled(true);
-                                registerDeviceBtn.setText("Update");
-                                return;
-                            }
-                            SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_API_KEY_KEY, newKey);
-                            Snackbar.make(view, "Device Registration Successful :)", Snackbar.LENGTH_LONG).show();
+                        apiCall.enqueue(new Callback<RegisterDeviceResponseDTO>() {
+                            @Override
+                            public void onResponse(Call<RegisterDeviceResponseDTO> call, Response<RegisterDeviceResponseDTO> response) {
+                                Log.d(TAG, response.toString());
+                                if (!response.isSuccessful()) {
+                                    Snackbar.make(view, extractErrorMessage(response), Snackbar.LENGTH_LONG).show();
+                                    registerDeviceBtn.setEnabled(true);
+                                    registerDeviceBtn.setText("Update");
+                                    return;
+                                }
+                                SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_API_KEY_KEY, newKey);
+                                Snackbar.make(view, "Device Registration Successful :)", Snackbar.LENGTH_LONG).show();
                             
                             if (response.body() != null && response.body().data != null && response.body().data.get("_id") != null) {
                                 deviceId = response.body().data.get("_id").toString();
@@ -432,6 +601,29 @@ public class MainActivity extends AppCompatActivity {
                                 SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_ID_KEY, deviceId);
                                 SharedPreferenceHelper.setSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, registerDeviceInput.isEnabled());
                                 gatewaySwitch.setChecked(registerDeviceInput.isEnabled());
+                                
+                                // Sync heartbeatIntervalMinutes from server response
+                                if (response.body().data.get("heartbeatIntervalMinutes") != null) {
+                                    Object intervalObj = response.body().data.get("heartbeatIntervalMinutes");
+                                    if (intervalObj instanceof Number) {
+                                        int intervalMinutes = ((Number) intervalObj).intValue();
+                                        SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_HEARTBEAT_INTERVAL_MINUTES_KEY, intervalMinutes);
+                                        Log.d(TAG, "Synced heartbeat interval from server: " + intervalMinutes + " minutes");
+                                    }
+                                }
+                                
+                                // Sync device name from server response
+                                if (response.body().data.get("name") != null) {
+                                    String deviceName = response.body().data.get("name").toString();
+                                    SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_NAME_KEY, deviceName);
+                                    deviceNameEditText.setText(deviceName);
+                                    Log.d(TAG, "Synced device name from server: " + deviceName);
+                                }
+                                
+                                // Schedule heartbeat if device is enabled
+                                if (registerDeviceInput.isEnabled()) {
+                                    HeartbeatManager.scheduleHeartbeat(mContext);
+                                }
                             }
                             
                             // Update stored version information
@@ -484,13 +676,26 @@ public class MainActivity extends AppCompatActivity {
                     updateDeviceInput.setAppVersionCode(BuildConfig.VERSION_CODE);
                     updateDeviceInput.setAppVersionName(BuildConfig.VERSION_NAME);
 
+                    // Get device name from input field or default to "brand model"
+                    String deviceName = deviceNameEditText.getText().toString().trim();
+                    if (deviceName.isEmpty()) {
+                        deviceName = Build.BRAND + " " + Build.MODEL;
+                    }
+                    updateDeviceInput.setName(deviceName);
+
+                    // Collect SIM information
+                    SimInfoCollectionDTO simInfoCollection = new SimInfoCollectionDTO();
+                    simInfoCollection.setLastUpdated(System.currentTimeMillis());
+                    simInfoCollection.setSims(TextBeeUtils.collectSimInfo(mContext));
+                    updateDeviceInput.setSimInfo(simInfoCollection);
+
                     Call<RegisterDeviceResponseDTO> apiCall = ApiManager.getApiService().updateDevice(deviceIdToUse, apiKey, updateDeviceInput);
                     apiCall.enqueue(new Callback<RegisterDeviceResponseDTO>() {
                         @Override
                         public void onResponse(Call<RegisterDeviceResponseDTO> call, Response<RegisterDeviceResponseDTO> response) {
                             Log.d(TAG, response.toString());
                             if (!response.isSuccessful()) {
-                                Snackbar.make(view, response.message().isEmpty() ? "An error occurred :( "+ response.code() : response.message(), Snackbar.LENGTH_LONG).show();
+                                Snackbar.make(view, extractErrorMessage(response), Snackbar.LENGTH_LONG).show();
                                 registerDeviceBtn.setEnabled(true);
                                 registerDeviceBtn.setText("Update");
                                 return;
@@ -503,6 +708,29 @@ public class MainActivity extends AppCompatActivity {
                                 SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_ID_KEY, deviceId);
                                 deviceIdTxt.setText(deviceId);
                                 deviceIdEditText.setText(deviceId);
+                                
+                                // Sync heartbeatIntervalMinutes from server response
+                                if (response.body().data.get("heartbeatIntervalMinutes") != null) {
+                                    Object intervalObj = response.body().data.get("heartbeatIntervalMinutes");
+                                    if (intervalObj instanceof Number) {
+                                        int intervalMinutes = ((Number) intervalObj).intValue();
+                                        SharedPreferenceHelper.setSharedPreferenceInt(mContext, AppConstants.SHARED_PREFS_HEARTBEAT_INTERVAL_MINUTES_KEY, intervalMinutes);
+                                        Log.d(TAG, "Synced heartbeat interval from server: " + intervalMinutes + " minutes");
+                                    }
+                                }
+                                
+                                // Sync device name from server response
+                                if (response.body().data.get("name") != null) {
+                                    String deviceName = response.body().data.get("name").toString();
+                                    SharedPreferenceHelper.setSharedPreferenceString(mContext, AppConstants.SHARED_PREFS_DEVICE_NAME_KEY, deviceName);
+                                    deviceNameEditText.setText(deviceName);
+                                    Log.d(TAG, "Synced device name from server: " + deviceName);
+                                }
+                                
+                                // Schedule heartbeat if device is enabled
+                                if (updateDeviceInput.isEnabled()) {
+                                    HeartbeatManager.scheduleHeartbeat(mContext);
+                                }
                             }
                             
                             // Update stored version information

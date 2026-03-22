@@ -50,7 +50,7 @@ export default function DownloadPage() {
     async function fetchReleases() {
       try {
         const response = await fetch(
-          'https://api.github.com/repos/vernu/textbee/releases'
+          'https://api.github.com/repos/agentlearningsxm/textbee-cloud/releases'
         )
         if (!response.ok) {
           throw new Error('Failed to fetch releases')
@@ -351,7 +351,7 @@ export default function DownloadPage() {
               className='text-gray-600 dark:text-gray-400'
             >
               <Link
-                href='https://github.com/vernu/textbee/releases'
+                href='https://github.com/agentlearningsxm/textbee-cloud/releases'
                 target='_blank'
                 rel='noopener noreferrer'
               >

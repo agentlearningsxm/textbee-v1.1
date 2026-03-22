@@ -14,6 +14,7 @@ import { ConfigModule } from '@nestjs/config'
 import { SmsQueueService } from './queue/sms-queue.service'
 import { SmsQueueProcessor } from './queue/sms-queue.processor'
 import { SmsStatusUpdateTask } from './tasks/sms-status-update.task'
+import { HeartbeatCheckTask } from './tasks/heartbeat-check.task'
 
 @Module({
   imports: [
@@ -39,8 +40,8 @@ import { SmsStatusUpdateTask } from './tasks/sms-status-update.task'
           type: 'exponential',
           delay: 1000,
         },
-        removeOnComplete: false,
-        removeOnFail: false,
+        removeOnComplete: { age: 24 * 3600 }, // 24 hours
+        removeOnFail: { age: 72 * 3600 }, // 72 hours
       },
     }),
     AuthModule,
@@ -50,7 +51,7 @@ import { SmsStatusUpdateTask } from './tasks/sms-status-update.task'
     ConfigModule,
   ],
   controllers: [GatewayController],
-  providers: [GatewayService, SmsQueueService, SmsQueueProcessor, SmsStatusUpdateTask],
+  providers: [GatewayService, SmsQueueService, SmsQueueProcessor, SmsStatusUpdateTask, HeartbeatCheckTask],
   exports: [MongooseModule, GatewayService, SmsQueueService],
 })
 export class GatewayModule {}

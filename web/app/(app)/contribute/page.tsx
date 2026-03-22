@@ -221,14 +221,14 @@ export default function ContributePage() {
                   <CardTitle className='text-lg'>Security Reports</CardTitle>
                   <CardDescription>
                     Report security vulnerabilities privately to{' '}
-                    <a href='mailto:security@textbee.dev'>
-                      security@textbee.dev
+                    <a href='mailto:support@textbee-cloud.vercel.app'>
+                      support@textbee-cloud.vercel.app
                     </a>
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Button className='w-full' variant='outline' asChild>
-                    <Link href='mailto:security@textbee.dev'>
+                    <Link href='mailto:support@textbee-cloud.vercel.app'>
                       <Shield className='mr-2 h-4 w-4' />
                       Report Vulnerability
                     </Link>
