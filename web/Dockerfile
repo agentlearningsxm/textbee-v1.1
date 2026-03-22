@@ -2,23 +2,21 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 
-# Install pnpm and required OpenSSL dependencies
+# Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
-RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Copy package.json and pnpm-lock.yaml
-COPY package.json pnpm-lock.yaml ./
+# Copy package.json and package-lock.json
+COPY package.json package-lock.json ./
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN npm ci --legacy-peer-deps
 
 # Stage 2: Builder
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Install pnpm and required OpenSSL dependencies
+# Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
-RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -38,17 +36,15 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 ENV NEXT_TELEMETRY_DISABLED 1
 
-
 # Build the application
-RUN pnpm build
+RUN npm run build
 
 # Stage 3: Production runner
 FROM node:22-alpine AS runner
 WORKDIR /app
 
-# Install pnpm and required OpenSSL dependencies
+# Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
-RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Set environment variables
 ENV NODE_ENV production
@@ -66,12 +62,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
-COPY --from=builder --chown=nextjs:nodejs /app/pnpm-lock.yaml ./
+COPY --from=builder --chown=nextjs:nodejs /app/package-lock.json ./
 
 # Install only production dependencies
-RUN pnpm install --prod --frozen-lockfile
+RUN npm ci --omit=dev --legacy-peer-deps
 
 # Switch to non-root user
 USER nextjs
@@ -80,8 +75,4 @@ USER nextjs
 ENV PORT 3000
 EXPOSE ${PORT}
 
-# Health check to verify app is running
-# HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-#   CMD wget -q -O - http://localhost:${PORT}/api/health || exit 1
-
-CMD ["node", "server"] 
+CMD ["node", "server"]
