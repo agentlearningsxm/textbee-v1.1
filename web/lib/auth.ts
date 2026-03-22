@@ -9,11 +9,10 @@ declare module 'next-auth' {
   interface Session {
     user: {
       id?: string
-      role?: string
+      role?: 'ADMIN' | 'REGULAR'
       phone?: string
       avatar?: string
       accessToken?: string
-      role?: 'ADMIN' | 'REGULAR'
     } & DefaultSession['user']
   }
 
