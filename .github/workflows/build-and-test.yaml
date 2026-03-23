@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        variant: [Selfhosted]
+        variant: [selfhosted]
     
     steps:
       - name: Checkout repository
@@ -101,7 +101,7 @@ jobs:
           fi
 
       - name: Create google-services.json for Selfhosted
-        if: matrix.variant == 'Selfhosted'
+        if: matrix.variant == 'selfhosted'
         run: |
           mkdir -p android/app/src/selfhosted
           if [ -n "${{ secrets.GOOGLE_SERVICES_JSON_PROD }}" ]; then
@@ -111,10 +111,16 @@ jobs:
             echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy"},"client":[{"client_info":{"mobilesdk_app_id":"dummy","android_client_info":{"package_name":"com.vernu.sms.selfhosted"}},"api_key":[{"current_key":"dummy"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}]}' > android/app/src/selfhosted/google-services.json
           fi
 
+      - name: Compute capitalized variant for Gradle
+        shell: bash
+        run: |
+          VARIANT="${{ matrix.variant }}"
+          echo "GRADLE_VARIANT=${VARIANT^}" >> $GITHUB_ENV
+
       - name: Build Android app
         run: |
           cd android
-          ./gradlew assemble${{ matrix.variant }}Debug
+          ./gradlew assemble${{ env.GRADLE_VARIANT }}Debug
       
       # - name: Run Android tests
       #   run: |
