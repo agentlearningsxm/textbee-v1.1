@@ -34,9 +34,12 @@ public class StickyNotificationService extends Service {
     private static final String TAG = "StickyNotificationService";
     private static final long POLLING_INTERVAL_MS = 15000; // Poll every 15 seconds
 
+    private static final int MAX_CONSECUTIVE_AUTH_FAILURES = 5;
+
     private AlarmManager alarmManager;
     private PendingIntent alarmPendingIntent;
     private boolean isPolling = false;
+    private int consecutiveAuthFailures = 0;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -248,9 +251,25 @@ public class StickyNotificationService extends Service {
                     public void onResponse(Call<PendingSMSResponseDTO> call, Response<PendingSMSResponseDTO> response) {
                         if (!response.isSuccessful() || response.body() == null || response.body().data == null) {
                             Log.e(TAG, "Failed to fetch pending SMS: " + response.code());
+
+                            // Circuit breaker: stop polling on persistent auth failures
+                            if (response.code() == 401) {
+                                consecutiveAuthFailures++;
+                                Log.w(TAG, "Auth failure " + consecutiveAuthFailures + "/" + MAX_CONSECUTIVE_AUTH_FAILURES);
+                                if (consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) {
+                                    Log.e(TAG, "Too many consecutive auth failures. API key is invalid or revoked. Stopping polling.");
+                                    stopPolling();
+                                    showAuthErrorNotification();
+                                    return;
+                                }
+                            }
+
                             scheduleNextPoll();
                             return;
                         }
+
+                        // Reset failure counter on success
+                        consecutiveAuthFailures = 0;
 
                         int count = response.body().data.count;
                         if (count == 0) {
@@ -322,6 +341,47 @@ public class StickyNotificationService extends Service {
 
             Log.d(TAG, "SMS to " + recipient + ": " + (smsSent ? "sent" : "failed"));
         }
+    }
+
+    /**
+     * Show a high-priority notification telling the user their API key is invalid.
+     * This replaces the foreground notification so they notice it.
+     */
+    private void showAuthErrorNotification() {
+        String notificationChannelId = "authErrorChannel";
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    notificationChannelId,
+                    "Authentication Errors",
+                    NotificationManager.IMPORTANCE_HIGH
+            );
+            channel.setDescription("Alerts when your API key is invalid or revoked");
+            notificationManager.createNotificationChannel(channel);
+        }
+
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+        );
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, notificationChannelId)
+                .setContentTitle("TextBee: Invalid API Key")
+                .setContentText("Your API key is invalid or revoked. Tap to open the app and enter a new key from the dashboard.")
+                .setStyle(new NotificationCompat.BigTextStyle()
+                        .bigText("Your API key is invalid or revoked. SMS gateway has stopped polling. Open the app, generate a new API key from the web dashboard, and tap Register."))
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH);
+
+        notificationManager.notify(2, builder.build());
+
+        // Also stop the foreground service since polling is stopped
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
     }
 
     /**

@@ -71,6 +71,15 @@ export class AuthGuard implements CanActivate {
       }
     }
 
-    throw new HttpException({ error: 'Unauthorized' }, HttpStatus.UNAUTHORIZED)
+    throw new HttpException(
+      {
+        error: 'Unauthorized',
+        code: apiKeyString ? 'INVALID_API_KEY' : 'NO_CREDENTIALS',
+        message: apiKeyString
+          ? 'API key is invalid, revoked, or does not exist. Please generate a new key from the dashboard.'
+          : 'No authentication credentials provided.',
+      },
+      HttpStatus.UNAUTHORIZED,
+    )
   }
 }

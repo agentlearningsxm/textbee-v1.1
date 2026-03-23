@@ -382,6 +382,23 @@ public class MainActivity extends AppCompatActivity {
      * 3. Generic error with status code as fallback
      */
     private String extractErrorMessage(Response<?> response) {
+        // Specific message for auth failures
+        if (response.code() == 401) {
+            // Try to get specific message from backend
+            try {
+                ResponseBody errorBody = response.errorBody();
+                if (errorBody != null) {
+                    String errorBodyString = errorBody.string();
+                    if (errorBodyString != null && errorBodyString.contains("INVALID_API_KEY")) {
+                        return "API key is invalid or revoked. Please generate a new key from the web dashboard.";
+                    }
+                }
+            } catch (IOException e) {
+                Log.d(TAG, "Could not read error body: " + e.getMessage());
+            }
+            return "Authentication failed. Your API key may be invalid or revoked. Generate a new one from the dashboard.";
+        }
+
         // Try to parse error from response body
         try {
             ResponseBody errorBody = response.errorBody();
@@ -403,12 +420,12 @@ public class MainActivity extends AppCompatActivity {
         } catch (IOException e) {
             Log.d(TAG, "Could not read error body: " + e.getMessage());
         }
-        
+
         // Fall back to response message
         if (response.message() != null && !response.message().isEmpty()) {
             return response.message();
         }
-        
+
         // Final fallback to generic error with status code
         return "An error occurred :( " + response.code();
     }
