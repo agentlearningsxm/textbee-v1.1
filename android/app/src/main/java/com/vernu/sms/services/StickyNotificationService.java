@@ -110,20 +110,31 @@ public class StickyNotificationService extends Service {
     /**
      * Android 15+ timeout handler for dataSync foreground services.
      * dataSync services have a 6-hour maximum runtime per 24-hour period.
+     * Do NOT restart immediately — the budget is exhausted and restarting causes a crash loop.
+     * Instead, schedule a delayed restart via AlarmManager after 1 hour.
      */
     public void onTimeout(int startId) {
-        Log.w(TAG, "Service timeout reached (Android 15+), restarting service");
+        Log.w(TAG, "Service timeout reached (Android 15+). Stopping gracefully and scheduling delayed restart.");
 
         // Stop current polling
         stopPolling();
         stopForeground(STOP_FOREGROUND_REMOVE);
 
-        // Restart the service
-        Intent restartIntent = new Intent(this, StickyNotificationService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(restartIntent);
-        } else {
-            startService(restartIntent);
+        // Schedule a delayed restart via AlarmManager (1 hour from now)
+        // This gives the dataSync budget time to refresh
+        try {
+            Intent restartIntent = new Intent(this, AlarmReceiver.class);
+            restartIntent.setAction(AlarmReceiver.ACTION_RESTART_SERVICE);
+            PendingIntent restartPendingIntent = PendingIntent.getBroadcast(
+                    this, 1, restartIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            long restartTime = SystemClock.elapsedRealtime() + (60 * 60 * 1000); // 1 hour
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, restartTime, restartPendingIntent);
+            Log.i(TAG, "Scheduled service restart in 1 hour");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to schedule delayed restart: " + e.getMessage());
         }
 
         stopSelf(startId);
