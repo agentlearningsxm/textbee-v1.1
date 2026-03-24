@@ -126,11 +126,15 @@ public class StickyNotificationService extends Service {
     }
 
     /**
-     * Android 15+ timeout handler for dataSync foreground services.
+     * Android 14+ (API 34) timeout handler for dataSync foreground services.
      * dataSync services have a 6-hour maximum runtime per 24-hour period.
      * Do NOT restart immediately — the budget is exhausted and restarting causes a crash loop.
      * Instead, schedule a delayed restart via AlarmManager after 1 hour.
+     *
+     * Note: Service.onTimeout(int) was added in API 34. On API 35+, the new
+     * onTimeout(int, int) delegates to this single-param version by default.
      */
+    @Override
     public void onTimeout(int startId) {
         Log.w(TAG, "Service timeout reached (Android 15+). Stopping gracefully and scheduling delayed restart.");
 
