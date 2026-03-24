@@ -72,6 +72,24 @@ public class StickyNotificationService extends Service {
             return START_NOT_STICKY;
         }
 
+        // Check if we're in a dataSync timeout cooldown (Android 15+ crash loop prevention)
+        long lastTimeoutAt = SharedPreferenceHelper.getSharedPreferenceLong(
+                getApplicationContext(), AppConstants.SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY, 0);
+        if (lastTimeoutAt > 0) {
+            long elapsed = System.currentTimeMillis() - lastTimeoutAt;
+            if (elapsed < AppConstants.DATASYNC_TIMEOUT_COOLDOWN_MS) {
+                Log.w(TAG, "In dataSync timeout cooldown (" + (elapsed / 1000) + "s elapsed, need " +
+                        (AppConstants.DATASYNC_TIMEOUT_COOLDOWN_MS / 1000) + "s). Not starting foreground service.");
+                stopSelf();
+                return START_NOT_STICKY;
+            } else {
+                // Cooldown expired, clear the flag
+                SharedPreferenceHelper.setSharedPreferenceLong(
+                        getApplicationContext(), AppConstants.SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY, 0);
+                Log.i(TAG, "DataSync timeout cooldown expired, resuming normal operation");
+            }
+        }
+
         // Start as foreground service with notification
         Notification notification = createNotification();
         try {
@@ -115,6 +133,10 @@ public class StickyNotificationService extends Service {
      */
     public void onTimeout(int startId) {
         Log.w(TAG, "Service timeout reached (Android 15+). Stopping gracefully and scheduling delayed restart.");
+
+        // Save timeout timestamp to prevent START_STICKY crash loop
+        SharedPreferenceHelper.setSharedPreferenceLong(
+                getApplicationContext(), AppConstants.SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY, System.currentTimeMillis());
 
         // Stop current polling
         stopPolling();

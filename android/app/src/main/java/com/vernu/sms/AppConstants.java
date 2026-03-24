@@ -27,4 +27,8 @@ public class AppConstants {
     public static final String SHARED_PREFS_SMS_SEND_DELAY_SECONDS_KEY = "SMS_SEND_DELAY_SECONDS";
     /** Default delay between SMS sends (seconds). 5s helps avoid carrier/device throttling. */
     public static final int DEFAULT_SMS_SEND_DELAY_SECONDS = 5;
+    /** Timestamp of last Android 15+ dataSync timeout. Used to prevent START_STICKY crash loops. */
+    public static final String SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY = "DATASYNC_TIMEOUT_AT";
+    /** Cooldown period after dataSync timeout before allowing foreground service restart (ms). */
+    public static final long DATASYNC_TIMEOUT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 }
