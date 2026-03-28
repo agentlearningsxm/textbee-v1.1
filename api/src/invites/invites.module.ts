@@ -5,6 +5,7 @@ import { InvitesController } from './invites.controller'
 import { InvitesService } from './invites.service'
 import { AuthModule } from '../auth/auth.module'
 import { UsersModule } from '../users/users.module'
+import { MailModule } from '../mail/mail.module'
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { UsersModule } from '../users/users.module'
     ]),
     forwardRef(() => AuthModule),
     UsersModule,
+    MailModule,
   ],
   controllers: [InvitesController],
   providers: [InvitesService],

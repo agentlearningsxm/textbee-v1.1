@@ -2,6 +2,7 @@ export const ApiEndpoints = {
   auth: {
     login: () => '/auth/login',
     register: () => '/auth/register',
+    requestAccess: () => '/auth/request-access',
     signInWithGoogle: () => '/auth/google-login',
     updateProfile: () => '/auth/update-profile',
     changePassword: () => '/auth/change-password',
@@ -60,5 +61,10 @@ export const ApiEndpoints = {
       delete: (id: string) => `/admin/users/${id}`,
     },
     stats: () => '/admin/stats',
+    registrationRequests: {
+      list: () => '/admin/registration-requests',
+      approve: (id: string) => `/admin/registration-requests/${id}/approve`,
+      reject: (id: string) => `/admin/registration-requests/${id}/reject`,
+    },
   },
 }

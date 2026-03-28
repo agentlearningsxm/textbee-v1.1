@@ -48,13 +48,23 @@ services:
       dockerfile: Dockerfile
     restart: always
     ports:
-      - "${PORT:-3001}:3001"
+      - "${API_PORT:-3003}:3003"
     env_file:
       - ./api/.env
     environment:
-      - PORT=${PORT:-3001}
+      - PORT=${API_PORT:-3003}
       - MONGO_URI=mongodb://adminUser:adminPassword@textbee-db:27017/textbee?authSource=admin
       - REDIS_URL=${REDIS_URL:-redis://textbee-redis:6379}
+      - MAIL_HOST=mailhog
+      - MAIL_PORT=1025
+      - MAIL_USER=
+      - MAIL_PASS=
+      - MAIL_FROM=noreply@textbee-local.dev
+      - FRONTEND_URL=http://localhost:3002
+      - REGISTRATION_MODE=invite_only
+      - JWT_SECRET=local-dev-jwt-secret-change-in-prod
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - CLOUDFLARE_TURNSTILE_SECRET_KEY=${CLOUDFLARE_TURNSTILE_SECRET_KEY:-1x0000000000000000000000000000000AA}
 
     depends_on:
       textbee-db:
@@ -72,19 +82,32 @@ services:
       args:
         - NEXT_PUBLIC_TURNSTILE_SITE_KEY=${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
         - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
-        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
-        - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3003/api/v1}
+        - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-http://localhost:3002}
+        - NEXT_PUBLIC_REGISTRATION_MODE=${NEXT_PUBLIC_REGISTRATION_MODE:-invite_only}
     restart: always
     ports:
-      - "${PORT:-3000}:3000"
+      - "${WEB_PORT:-3002}:3002"
     env_file:
       - ./web/.env
     environment:
-      - PORT=${PORT:-3000}
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
+      - PORT=${WEB_PORT:-3002}
+      - CONTAINER_RUNTIME=docker
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3003/api/v1}
 
     depends_on:
       - textbee-api
+    networks:
+      - textbee-network
+
+  # MailHog - local test mail server (catches all emails, view at localhost:8025)
+  mailhog:
+    container_name: textbee-mailhog
+    image: mailhog/mailhog:latest
+    restart: always
+    ports:
+      - "1025:1025"   # SMTP server
+      - "8025:8025"   # Web UI
     networks:
       - textbee-network
 

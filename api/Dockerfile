@@ -41,8 +41,8 @@ RUN addgroup --system --gid 1001 nodejs && \
 USER nestjs
 
 # Expose the port specified by the PORT environment variable (default: 3001)
-ENV PORT 3001
-EXPOSE ${PORT}
+ENV PORT 3003
+EXPOSE 3003
 
 # Command to run the application
 CMD ["node", "dist/main"]

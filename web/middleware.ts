@@ -54,8 +54,8 @@ export async function middleware(request: NextRequest)
     }
   }
 
-  // If user is authenticated and visiting /app/login or /app/register, redirect to /app/dashboard
-  if (token && (pathname === Routes.login || pathname === Routes.register))
+  // If user is authenticated and visiting auth pages, redirect to dashboard
+  if (token && (pathname === Routes.login || pathname === Routes.register || pathname === Routes.requestAccess))
   {
     const dashboardUrl = new URL(Routes.dashboard, request.url)
     return NextResponse.redirect(dashboardUrl)

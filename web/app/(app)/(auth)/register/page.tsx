@@ -46,7 +46,16 @@ export default function RegisterPage() {
             <LoginWithGoogle />
           </div>
         </CardContent>
-        <CardFooter className='text-center'>
+        <CardFooter className='flex flex-col space-y-2 text-center'>
+          <p className='text-sm text-gray-600'>
+            Don't have an invite code?{' '}
+            <Link
+              href='/request-access'
+              className='font-medium text-brand-600 hover:underline'
+            >
+              Request access
+            </Link>
+          </p>
           <p className='text-sm text-gray-600'>
             Already have an account?{' '}
             <Link

@@ -1,6 +1,6 @@
 'use client'
 
-import { Shield, Users, Mail, BarChart3 } from 'lucide-react'
+import { Shield, Users, Mail, BarChart3, UserPlus } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
@@ -82,6 +82,12 @@ export default function AdminLayout({
               icon={<Mail className='h-4 w-4' />}
               label='Invite Codes'
               isActive={pathname?.startsWith('/admin/invites')}
+            />
+            <NavTab
+              href='/admin/approval-queue'
+              icon={<UserPlus className='h-4 w-4' />}
+              label='Approval Queue'
+              isActive={pathname?.startsWith('/admin/approval-queue')}
             />
           </div>
         </div>

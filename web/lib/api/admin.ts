@@ -42,6 +42,21 @@ export interface AdminStats {
   totalSMSReceived: number
 }
 
+export interface RegistrationRequest {
+  _id: string
+  name: string
+  email: string
+  phone?: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: string
+  reviewedBy?: {
+    _id: string
+    email: string
+    name: string
+  }
+  reviewedAt?: string
+}
+
 export const adminApi = {
   // User Management
   async listUsers() {
@@ -85,7 +100,7 @@ export const adminApi = {
   },
 
   // Invite Management
-  async createInvite(data: { maxUses?: number; expiresAt?: string }) {
+  async createInvite(data: { maxUses?: number; expiresInDays?: number; email?: string; note?: string }) {
     const response = await httpBrowserClient.post<{ data: InviteCode }>(
       ApiEndpoints.admin.invites.create(),
       data
@@ -101,13 +116,36 @@ export const adminApi = {
   },
 
   async revokeInvite(id: string) {
-    await httpBrowserClient.delete(ApiEndpoints.admin.invites.delete(id))
+    await httpBrowserClient.post(ApiEndpoints.admin.invites.revoke(id))
   },
 
   // System Stats
   async getStats() {
     const response = await httpBrowserClient.get<{ data: AdminStats }>(
       ApiEndpoints.admin.stats()
+    )
+    return response.data.data
+  },
+
+  // Registration Request Queue
+  async listRegistrationRequests(status?: string) {
+    const url = status
+      ? `${ApiEndpoints.admin.registrationRequests.list()}?status=${status}`
+      : ApiEndpoints.admin.registrationRequests.list()
+    const response = await httpBrowserClient.get<{ data: RegistrationRequest[] }>(url)
+    return response.data.data
+  },
+
+  async approveRegistrationRequest(id: string) {
+    const response = await httpBrowserClient.post<{ data: RegistrationRequest }>(
+      ApiEndpoints.admin.registrationRequests.approve(id)
+    )
+    return response.data.data
+  },
+
+  async rejectRegistrationRequest(id: string) {
+    const response = await httpBrowserClient.post<{ data: RegistrationRequest }>(
+      ApiEndpoints.admin.registrationRequests.reject(id)
     )
     return response.data.data
   },

@@ -9,4 +9,7 @@ export class CreateInviteDto {
 
   @ApiProperty({ type: String, required: false, description: 'Optional note for admin reference' })
   note?: string
+
+  @ApiProperty({ type: String, required: false, description: 'Email address to send the invite code to' })
+  email?: string
 }

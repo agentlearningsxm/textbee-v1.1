@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { adminApi, InviteCode } from '@/lib/api/admin'
-import { Mail, Copy, Trash2, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react'
+import { Mail, Copy, Trash2, CheckCircle, XCircle, Clock, RefreshCw, Send } from 'lucide-react'
 
 export default function InvitesPage() {
   const [invites, setInvites] = useState<InviteCode[]>([])
@@ -10,10 +10,13 @@ export default function InvitesPage() {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // Form state
   const [maxUses, setMaxUses] = useState(1)
   const [expiryDays, setExpiryDays] = useState(30)
+  const [email, setEmail] = useState('')
+  const [note, setNote] = useState('')
 
   useEffect(() => {
     loadInvites()
@@ -36,17 +39,26 @@ export default function InvitesPage() {
   const handleCreateInvite = async () => {
     try {
       setCreating(true)
-      const expiresAt = new Date()
-      expiresAt.setDate(expiresAt.getDate() + expiryDays)
+      setSuccessMessage(null)
 
-      await adminApi.createInvite({
-        maxUses,
-        expiresAt: expiresAt.toISOString(),
-      })
+      const payload: any = { maxUses, expiresInDays: expiryDays }
+      if (email.trim()) payload.email = email.trim()
+      if (note.trim()) payload.note = note.trim()
+
+      await adminApi.createInvite(payload)
+
+      const msg = email.trim()
+        ? `Invite code created and sent to ${email.trim()}`
+        : 'Invite code created successfully'
+      setSuccessMessage(msg)
 
       await loadInvites()
       setMaxUses(1)
       setExpiryDays(30)
+      setEmail('')
+      setNote('')
+
+      setTimeout(() => setSuccessMessage(null), 5000)
     } catch (err: any) {
       alert(err?.response?.data?.message || 'Failed to create invite code')
     } finally {
@@ -131,6 +143,44 @@ export default function InvitesPage() {
         <h3 className='text-lg font-semibold text-gray-900 dark:text-white mb-4'>
           Generate New Invite Code
         </h3>
+
+        {successMessage && (
+          <div className='mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md'>
+            <p className='text-sm text-green-800 dark:text-green-200'>{successMessage}</p>
+          </div>
+        )}
+
+        <div className='grid grid-cols-1 md:grid-cols-2 gap-4 mb-4'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              Send Invite To (Email)
+            </label>
+            <input
+              type='email'
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder='user@example.com (optional)'
+              className='w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500'
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              If provided, the invite code will be emailed automatically
+            </p>
+          </div>
+
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              Note (optional)
+            </label>
+            <input
+              type='text'
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder='Internal note or message for the invitee'
+              className='w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500'
+            />
+          </div>
+        </div>
+
         <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
           <div>
             <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
@@ -170,9 +220,16 @@ export default function InvitesPage() {
             <button
               onClick={handleCreateInvite}
               disabled={creating}
-              className='w-full px-6 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+              className='w-full px-6 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2'
             >
-              {creating ? 'Creating...' : 'Generate Code'}
+              {creating ? (
+                <span>Creating...</span>
+              ) : (
+                <>
+                  {email.trim() ? <Send className='h-4 w-4' /> : null}
+                  <span>{email.trim() ? 'Generate & Send' : 'Generate Code'}</span>
+                </>
+              )}
             </button>
           </div>
         </div>

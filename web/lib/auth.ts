@@ -24,6 +24,17 @@ declare module 'next-auth' {
   }
 }
 
+// augment the JWT type so middleware can access token.role without TS errors
+declare module 'next-auth/jwt' {
+  interface JWT {
+    id?: string
+    role?: 'ADMIN' | 'REGULAR'
+    phone?: string
+    avatar?: string
+    accessToken?: string
+  }
+}
+
 export const authOptions = {
   providers: [
     CredentialsProvider({

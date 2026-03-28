@@ -5,6 +5,7 @@ export const Routes = {
   quickstart: '/dashboard', // Self-hosted: redirects to dashboard
   login: '/login',
   register: '/register',
+  requestAccess: '/request-access',
   logout: '/logout',
   resetPassword: '/reset-password',
   verifyEmail: '/verify-email',

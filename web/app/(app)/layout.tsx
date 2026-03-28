@@ -7,7 +7,7 @@ import LayoutWrapper from './layout-wrapper'
 import Analytics from '@/components/shared/analytics'
 import { Toaster } from '@/components/ui/toaster'
 import Footer from '@/components/shared/footer'
-import SupportHQWidget from '@/components/shared/support-hq-widget'
+import SupportWidget from '@/components/shared/support-widget'
 
 export default async function RootLayout({ children }: PropsWithChildren) {
   const session: Session | null = await getServerSession(authOptions as any)
@@ -19,7 +19,7 @@ export default async function RootLayout({ children }: PropsWithChildren) {
         <main className='min-h-[80vh]'>{children}</main>
         <Analytics user={session?.user} />
         <Footer />
-        <SupportHQWidget />
+        <SupportWidget />
         <Toaster />
       </LayoutWrapper>
     </>

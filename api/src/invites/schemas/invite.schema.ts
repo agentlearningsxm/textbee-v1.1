@@ -31,6 +31,9 @@ export class Invite {
 
   @Prop({ type: Boolean, default: false })
   isRevoked: boolean
+
+  @Prop({ type: String })
+  email?: string
 }
 
 export const InviteSchema = SchemaFactory.createForClass(Invite)

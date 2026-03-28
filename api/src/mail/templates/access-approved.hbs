@@ -1,0 +1,48 @@
+<html>
+  <head>
+    <meta charset='utf-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Your Access Has Been Approved</title>
+    <style>
+      body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6; color: #333; margin: 0; padding: 0; background-color:
+      #f7f9fc; } .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+      .content { background-color: #ffffff; padding: 35px; border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05); } .button { display: inline-block;
+      background-color: #22c55e; color: white; text-decoration: none; padding:
+      12px 28px; border-radius: 4px; font-weight: 600; margin: 25px 0; }
+      .footer { text-align: center; font-size: 12px; color: #777; margin-top:
+      30px; } .approved-banner { background-color: #22c55e; color: white; padding:
+      30px; text-align: center; border-radius: 8px 8px 0 0; margin: -35px -35px
+      30px -35px; } .approved-banner h1 { margin: 0; font-size: 28px; }
+    </style>
+  </head>
+  <body>
+    <div class='container'>
+      <div class='content'>
+        <div class='approved-banner'>
+          <h1>Access Approved!</h1>
+        </div>
+
+        <h2>Hi {{name}},</h2>
+
+        <p>Great news! Your request to access TextBee has been approved by an
+          administrator. You can now log in to your account and start using the
+          SMS gateway.</p>
+
+        <div style='text-align: center;'>
+          <a href='{{loginUrl}}' class='button'>Log In to Your Account</a>
+        </div>
+
+        <p>Your account has been created with the email address you registered
+          with. Use the password you set during registration to log in.</p>
+
+        <p>If you have any questions, feel free to reach out to our support team.</p>
+      </div>
+
+      <div class='footer'>
+        <p>This email was sent by TextBee.</p>
+      </div>
+    </div>
+  </body>
+</html>

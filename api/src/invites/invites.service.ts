@@ -5,11 +5,13 @@ import * as crypto from 'crypto'
 import { Invite, InviteDocument } from './schemas/invite.schema'
 import { CreateInviteDto } from './dto/create-invite.dto'
 import { UserDocument } from '../users/schemas/user.schema'
+import { MailService } from '../mail/mail.service'
 
 @Injectable()
 export class InvitesService {
   constructor(
     @InjectModel(Invite.name) private inviteModel: Model<InviteDocument>,
+    private readonly mailService: MailService,
   ) {}
 
   /**
@@ -26,7 +28,7 @@ export class InvitesService {
     dto: CreateInviteDto,
     admin: UserDocument,
   ): Promise<Invite> {
-    const { maxUses = 1, expiresInDays = 7, note } = dto
+    const { maxUses = 1, expiresInDays = 7, note, email } = dto
     const code = this.generateInviteCode()
     const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
 
@@ -36,9 +38,34 @@ export class InvitesService {
       maxUses,
       expiresAt,
       note,
+      email: email || undefined,
     })
 
-    return await invite.save()
+    const savedInvite = await invite.save()
+
+    // Send invite email if email address was provided
+    if (email) {
+      const frontendUrl = process.env.FRONTEND_URL || 'https://textbee.dev'
+      const registerUrl = `${frontendUrl}/register?invite=${code}`
+
+      this.mailService
+        .sendEmailFromTemplate({
+          to: email,
+          subject: "You're invited to join TextBee",
+          template: 'invite-email',
+          context: {
+            inviteCode: code,
+            registerUrl,
+            note: note || '',
+            expiresAt: expiresAt.toLocaleDateString(),
+          },
+        })
+        .catch((e) => {
+          console.log(`Failed to send invite email to ${email}:`, e?.message)
+        })
+    }
+
+    return savedInvite
   }
 
   /**
