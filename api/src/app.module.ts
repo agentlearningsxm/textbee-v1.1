@@ -23,6 +23,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter'
 import { InvitesModule } from './invites/invites.module'
 import { AdminModule } from './admin/admin.module'
 import { RegistrationRequestsModule } from './registration-requests/registration-requests.module'
+import { SeedModule } from './seed/seed.module'
 
 @Injectable()
 export class LoggerMiddleware implements NestMiddleware {
@@ -66,6 +67,7 @@ export class LoggerMiddleware implements NestMiddleware {
     InvitesModule,
     AdminModule,
     RegistrationRequestsModule,
+    SeedModule,
   ],
   controllers: [],
   providers: [
