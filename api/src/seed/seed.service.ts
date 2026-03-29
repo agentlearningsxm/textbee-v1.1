@@ -21,8 +21,9 @@ export class SeedService implements OnApplicationBootstrap {
     try {
       const existing = await this.userModel.findOne({ email })
       if (existing) {
-        await this.userModel.updateOne({ email }, { $set: { role: UserRole.ADMIN, emailVerifiedAt: new Date() } })
-        this.logger.log(`Promoted existing user to ADMIN: ${email}`)
+        const hash = await bcrypt.hash(secret, 10)
+        await this.userModel.updateOne({ email }, { $set: { role: UserRole.ADMIN, emailVerifiedAt: new Date(), password: hash } })
+        this.logger.log(`Promoted existing user to ADMIN and reset password: ${email}`)
       } else {
         const hash = await bcrypt.hash(secret, 10)
         await this.userModel.create({
