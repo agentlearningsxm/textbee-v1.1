@@ -216,4 +216,11 @@ export class InvitesService {
   isInviteOnlyMode(): boolean {
     return process.env.REGISTRATION_MODE === 'invite_only'
   }
+
+  /**
+   * Check if registration requires admin approval
+   */
+  isApprovalRequiredMode(): boolean {
+    return process.env.REGISTRATION_MODE === 'approval_required'
+  }
 }

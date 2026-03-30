@@ -154,6 +154,14 @@ export class AuthService {
       }
     }
 
+    const isApprovalRequired = this.invitesService.isApprovalRequiredMode()
+    if (isApprovalRequired) {
+      throw new HttpException(
+        { error: 'Registration requires admin approval. Please use the Request Access form instead.' },
+        HttpStatus.FORBIDDEN,
+      )
+    }
+
     const existingUser = await this.usersService.findOne({
       email: userData.email,
     })

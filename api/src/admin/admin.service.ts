@@ -5,6 +5,7 @@ import { User } from '../users/schemas/user.schema'
 import { Device } from '../gateway/schemas/device.schema'
 import { SMS } from '../gateway/schemas/sms.schema'
 import { UserRole } from '../users/user-roles.enum'
+import * as bcrypt from 'bcryptjs'
 
 @Injectable()
 export class AdminService {
@@ -101,6 +102,28 @@ export class AdminService {
 
     // Delete the user
     await this.userModel.findByIdAndDelete(userId).exec()
+  }
+
+  async createUser(data: { name: string; email: string; password: string; phone?: string }): Promise<User> {
+    const existing = await this.userModel.findOne({ email: data.email }).exec()
+    if (existing) {
+      throw new HttpException(
+        { error: 'A user with this email already exists' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    const hashedPassword = await bcrypt.hash(data.password, 10)
+    const user = new this.userModel({
+      name: data.name,
+      email: data.email,
+      password: hashedPassword,
+      phone: data.phone,
+      emailVerified: true,
+    })
+    await user.save()
+
+    return this.userModel.findById(user._id).select('-password').exec()
   }
 
   // System Statistics

@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { adminApi } from '@/lib/api/admin'
 
 export default function AdminLayout({
   children,
@@ -15,6 +16,7 @@ export default function AdminLayout({
   const pathname = usePathname()
   const { data: session, status } = useSession()
   const router = useRouter()
+  const [pendingCount, setPendingCount] = useState<number>(0)
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -23,6 +25,12 @@ export default function AdminLayout({
       router.push('/dashboard')
     }
   }, [status, session, router])
+
+  useEffect(() => {
+    if (status === 'authenticated' && session?.user?.role === 'ADMIN') {
+      adminApi.getPendingRequestCount().then(setPendingCount).catch(() => {})
+    }
+  }, [status, session])
 
   if (status === 'loading') {
     return (
@@ -88,6 +96,7 @@ export default function AdminLayout({
               icon={<UserPlus className='h-4 w-4' />}
               label='Approval Queue'
               isActive={pathname?.startsWith('/admin/approval-queue')}
+              badge={pendingCount}
             />
           </div>
         </div>
@@ -106,11 +115,13 @@ function NavTab({
   icon,
   label,
   isActive,
+  badge,
 }: {
   href: string
   icon: React.ReactNode
   label: string
   isActive: boolean
+  badge?: number
 }) {
   return (
     <Link
@@ -123,6 +134,11 @@ function NavTab({
     >
       {icon}
       <span>{label}</span>
+      {badge != null && badge > 0 && (
+        <span className='ml-1 inline-flex items-center justify-center h-5 w-5 rounded-full bg-red-500 text-white text-xs font-bold'>
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   )
 }

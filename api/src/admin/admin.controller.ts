@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Delete,
   Param,
@@ -20,6 +21,12 @@ export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   // User Management Endpoints
+  @Post('users')
+  async createUser(@Body() body: { name: string; email: string; password: string; phone?: string }) {
+    const user = await this.adminService.createUser(body)
+    return { data: user, message: 'User created successfully' }
+  }
+
   @Get('users')
   async getAllUsers() {
     const users = await this.adminService.getAllUsers()

@@ -226,4 +226,8 @@ export class RegistrationRequestsService {
 
     return request
   }
+
+  async getPendingCount(): Promise<number> {
+    return this.registrationRequestModel.countDocuments({ status: 'pending' })
+  }
 }

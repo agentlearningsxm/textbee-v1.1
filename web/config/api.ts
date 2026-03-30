@@ -53,6 +53,7 @@ export const ApiEndpoints = {
       delete: (id: string) => `/admin/invites/${id}`,
     },
     users: {
+      create: () => '/admin/users',
       list: () => '/admin/users',
       get: (id: string) => `/admin/users/${id}`,
       updateRole: (id: string) => `/admin/users/${id}/role`,
@@ -63,6 +64,7 @@ export const ApiEndpoints = {
     stats: () => '/admin/stats',
     registrationRequests: {
       list: () => '/admin/registration-requests',
+      pendingCount: () => '/admin/registration-requests/pending-count',
       approve: (id: string) => `/admin/registration-requests/${id}/approve`,
       reject: (id: string) => `/admin/registration-requests/${id}/reject`,
     },

@@ -56,6 +56,16 @@ export class RegistrationRequestsController {
   }
 
   @ApiTags('admin')
+  @ApiOperation({ summary: 'Get pending registration request count (Admin only)' })
+  @Get('admin/registration-requests/pending-count')
+  @UseGuards(AuthGuard, AdminOnlyGuard)
+  @ApiBearerAuth()
+  async getPendingCount() {
+    const count = await this.registrationRequestsService.getPendingCount()
+    return { data: { count } }
+  }
+
+  @ApiTags('admin')
   @ApiOperation({ summary: 'Approve a registration request (Admin only)' })
   @Post('admin/registration-requests/:id/approve')
   @UseGuards(AuthGuard, AdminOnlyGuard)

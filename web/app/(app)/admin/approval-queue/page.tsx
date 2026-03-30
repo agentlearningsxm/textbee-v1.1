@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { adminApi, RegistrationRequest } from '@/lib/api/admin'
-import { CheckCircle, XCircle, Clock, RefreshCw, UserPlus, UserX } from 'lucide-react'
+import { CheckCircle, XCircle, Clock, RefreshCw, UserPlus, UserX, Search } from 'lucide-react'
 
 export default function ApprovalQueuePage() {
   const [requests, setRequests] = useState<RegistrationRequest[]>([])
@@ -10,6 +10,7 @@ export default function ApprovalQueuePage() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('pending')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     loadRequests()
@@ -63,6 +64,17 @@ export default function ApprovalQueuePage() {
 
   const pendingCount = requests.filter((r) => r.status === 'pending').length
 
+  const filteredRequests = search
+    ? requests.filter((r) => {
+        const q = search.toLowerCase()
+        return (
+          r.name?.toLowerCase().includes(q) ||
+          r.email?.toLowerCase().includes(q) ||
+          r.phone?.toLowerCase().includes(q)
+        )
+      })
+    : requests
+
   if (loading) {
     return (
       <div className='flex items-center justify-center py-12'>
@@ -111,6 +123,18 @@ export default function ApprovalQueuePage() {
         </button>
       </div>
 
+      {/* Search */}
+      <div className='relative'>
+        <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400' />
+        <input
+          type='text'
+          placeholder='Search by name, email, or phone...'
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className='w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500'
+        />
+      </div>
+
       {/* Filter tabs */}
       <div className='flex space-x-2'>
         {['pending', 'approved', 'rejected', ''].map((status) => (
@@ -152,7 +176,7 @@ export default function ApprovalQueuePage() {
               </tr>
             </thead>
             <tbody className='bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700'>
-              {requests.map((request) => (
+              {filteredRequests.map((request) => (
                 <tr
                   key={request._id}
                   className='hover:bg-gray-50 dark:hover:bg-gray-700/50'
@@ -223,16 +247,20 @@ export default function ApprovalQueuePage() {
           </table>
         </div>
 
-        {requests.length === 0 && (
+        {filteredRequests.length === 0 && (
           <div className='text-center py-12'>
             <UserPlus className='mx-auto h-12 w-12 text-gray-400' />
             <h3 className='mt-2 text-sm font-medium text-gray-900 dark:text-white'>
-              {filter === 'pending'
+              {search
+                ? 'No matching requests'
+                : filter === 'pending'
                 ? 'No pending requests'
                 : `No ${filter || ''} requests`}
             </h3>
             <p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
-              {filter === 'pending'
+              {search
+                ? 'Try a different search term.'
+                : filter === 'pending'
                 ? 'When users request access, they will appear here.'
                 : 'No requests match this filter.'}
             </p>

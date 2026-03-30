@@ -99,6 +99,14 @@ export const adminApi = {
     await httpBrowserClient.delete(ApiEndpoints.admin.users.delete(id))
   },
 
+  async createUser(data: { name: string; email: string; password: string; phone?: string }) {
+    const response = await httpBrowserClient.post<{ data: User }>(
+      ApiEndpoints.admin.users.create(),
+      data
+    )
+    return response.data.data
+  },
+
   // Invite Management
   async createInvite(data: { maxUses?: number; expiresInDays?: number; email?: string; note?: string }) {
     const response = await httpBrowserClient.post<{ data: InviteCode }>(
@@ -117,6 +125,13 @@ export const adminApi = {
 
   async revokeInvite(id: string) {
     await httpBrowserClient.post(ApiEndpoints.admin.invites.revoke(id))
+  },
+
+  async getPendingRequestCount() {
+    const response = await httpBrowserClient.get<{ data: { count: number } }>(
+      ApiEndpoints.admin.registrationRequests.pendingCount()
+    )
+    return response.data.data.count
   },
 
   // System Stats
