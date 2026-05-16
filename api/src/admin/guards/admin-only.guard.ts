@@ -17,7 +17,7 @@ export class AdminOnlyGuard implements CanActivate {
     }
 
     throw new HttpException(
-      { error: 'Admin access required. You do not have sufficient permissions.' },
+      { message: 'Admin access required. You do not have sufficient permissions.' },
       HttpStatus.FORBIDDEN,
     )
   }

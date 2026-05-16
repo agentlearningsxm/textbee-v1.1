@@ -56,7 +56,7 @@ export class AdminService {
 
     if (user.isBanned) {
       throw new HttpException(
-        { error: 'User is already banned' },
+        { message: 'User is already banned' },
         HttpStatus.BAD_REQUEST,
       )
     }
@@ -76,7 +76,7 @@ export class AdminService {
 
     if (!user.isBanned) {
       throw new HttpException(
-        { error: 'User is not banned' },
+        { message: 'User is not banned' },
         HttpStatus.BAD_REQUEST,
       )
     }
@@ -108,7 +108,7 @@ export class AdminService {
     const existing = await this.userModel.findOne({ email: data.email }).exec()
     if (existing) {
       throw new HttpException(
-        { error: 'A user with this email already exists' },
+        { message: 'A user with this email already exists' },
         HttpStatus.BAD_REQUEST,
       )
     }
