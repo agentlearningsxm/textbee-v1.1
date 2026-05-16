@@ -13,6 +13,9 @@ export default function UsersPage() {
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'BANNED'>('ALL')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', phone: '' })
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [passwordStrength, setPasswordStrength] = useState<'weak' | 'medium' | 'strong' | ''>('')
+  const [passwordErrors, setPasswordErrors] = useState<string[]>([])
   const [createLoading, setCreateLoading] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -65,8 +68,64 @@ export default function UsersPage() {
     }
   }
 
+  const validatePassword = (password: string, confirm: string) => {
+    const errors: string[] = []
+    let score = 0
+
+    if (password.length < 8) {
+      errors.push('Password must be at least 8 characters')
+    } else {
+      score++
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      errors.push('Password must contain at least one uppercase letter')
+    } else {
+      score++
+    }
+
+    if (!/[0-9]/.test(password)) {
+      errors.push('Password must contain at least one number')
+    } else {
+      score++
+    }
+
+    if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
+      errors.push('Password must contain at least one special character')
+    } else {
+      score++
+    }
+
+    if (confirm && password !== confirm) {
+      errors.push('Passwords do not match')
+    }
+
+    const strength = score <= 1 ? 'weak' : score === 2 || score === 3 ? 'medium' : 'strong'
+
+    setPasswordErrors(errors)
+    setPasswordStrength(password ? strength : '')
+  }
+
+  const handlePasswordChange = (value: string) => {
+    setCreateForm({ ...createForm, password: value })
+    validatePassword(value, passwordConfirm)
+  }
+
+  const handlePasswordConfirmChange = (value: string) => {
+    setPasswordConfirm(value)
+    validatePassword(createForm.password, value)
+  }
+
+  const isPasswordValid = () => {
+    return passwordStrength === 'medium' || passwordStrength === 'strong'
+  }
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!isPasswordValid() || passwordErrors.length > 0) {
+      setCreateError('Please fix password issues before submitting')
+      return
+    }
     setCreateLoading(true)
     setCreateError(null)
     try {
@@ -78,6 +137,9 @@ export default function UsersPage() {
       })
       setShowCreateForm(false)
       setCreateForm({ name: '', email: '', password: '', phone: '' })
+      setPasswordConfirm('')
+      setPasswordStrength('')
+      setPasswordErrors([])
       await loadUsers()
     } catch (err: any) {
       setCreateError(err?.response?.data?.message || err?.response?.data?.error || 'Failed to create user')
@@ -221,9 +283,52 @@ export default function UsersPage() {
                 id='create-password'
                 type='password'
                 required
-                minLength={6}
+                minLength={8}
                 value={createForm.password}
-                onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                onChange={(e) => handlePasswordChange(e.target.value)}
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500'
+              />
+              {createForm.password && (
+                <div className='mt-2'>
+                  <div className='flex items-center space-x-2 mb-1'>
+                    <div className='flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden'>
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          passwordStrength === 'weak' ? 'w-1/3 bg-red-500' :
+                          passwordStrength === 'medium' ? 'w-2/3 bg-yellow-500' :
+                          passwordStrength === 'strong' ? 'w-full bg-green-500' :
+                          'w-0'
+                        }`}
+                      />
+                    </div>
+                    {passwordStrength && (
+                      <span className={`text-xs font-medium ${
+                        passwordStrength === 'weak' ? 'text-red-600 dark:text-red-400' :
+                        passwordStrength === 'medium' ? 'text-yellow-600 dark:text-yellow-400' :
+                        'text-green-600 dark:text-green-400'
+                      }`}>
+                        {passwordStrength.charAt(0).toUpperCase() + passwordStrength.slice(1)}
+                      </span>
+                    )}
+                  </div>
+                  {passwordErrors.length > 0 && (
+                    <ul className='text-xs text-red-600 dark:text-red-400 space-y-1 mt-2'>
+                      {passwordErrors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+            <div>
+              <label htmlFor='create-password-confirm' className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>Confirm Password *</label>
+              <input
+                id='create-password-confirm'
+                type='password'
+                required
+                value={passwordConfirm}
+                onChange={(e) => handlePasswordConfirmChange(e.target.value)}
                 className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500'
               />
             </div>
@@ -247,8 +352,8 @@ export default function UsersPage() {
               </button>
               <button
                 type='submit'
-                disabled={createLoading}
-                className='flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors'
+                disabled={createLoading || !isPasswordValid() || passwordErrors.length > 0}
+                className='flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
               >
                 <UserPlus className='h-4 w-4' />
                 <span>{createLoading ? 'Creating...' : 'Create User'}</span>

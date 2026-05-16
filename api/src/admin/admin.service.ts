@@ -113,6 +113,38 @@ export class AdminService {
       )
     }
 
+    if (!data.password) {
+      throw new HttpException(
+        { message: 'Password is required' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    if (data.password.length < 8) {
+      throw new HttpException(
+        { message: 'Password must be at least 8 characters' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+    if (!/[A-Z]/.test(data.password)) {
+      throw new HttpException(
+        { message: 'Password must contain at least one uppercase letter' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+    if (!/[0-9]/.test(data.password)) {
+      throw new HttpException(
+        { message: 'Password must contain at least one number' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+    if (!/[^A-Za-z0-9]/.test(data.password)) {
+      throw new HttpException(
+        { message: 'Password must contain at least one special character' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
     const hashedPassword = await bcrypt.hash(data.password, 10)
     const user = new this.userModel({
       name: data.name,
