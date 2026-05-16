@@ -80,7 +80,7 @@ export default function UsersPage() {
       setCreateForm({ name: '', email: '', password: '', phone: '' })
       await loadUsers()
     } catch (err: any) {
-      setCreateError(err?.response?.data?.error || 'Failed to create user')
+      setCreateError(err?.response?.data?.message || err?.response?.data?.error || 'Failed to create user')
     } finally {
       setCreateLoading(false)
     }

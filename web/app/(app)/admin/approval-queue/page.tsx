@@ -40,7 +40,7 @@ export default function ApprovalQueuePage() {
       await adminApi.approveRegistrationRequest(id)
       await loadRequests()
     } catch (err: any) {
-      alert(err?.response?.data?.error || 'Failed to approve request')
+      alert(err?.response?.data?.message || err?.response?.data?.error || 'Failed to approve request')
     } finally {
       setActionLoading(null)
     }
@@ -56,7 +56,7 @@ export default function ApprovalQueuePage() {
       await adminApi.rejectRegistrationRequest(id)
       await loadRequests()
     } catch (err: any) {
-      alert(err?.response?.data?.error || 'Failed to reject request')
+      alert(err?.response?.data?.message || err?.response?.data?.error || 'Failed to reject request')
     } finally {
       setActionLoading(null)
     }
