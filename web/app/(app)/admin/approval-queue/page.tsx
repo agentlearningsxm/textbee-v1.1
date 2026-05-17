@@ -255,7 +255,11 @@ export default function ApprovalQueuePage() {
                 ? 'No matching requests'
                 : filter === 'pending'
                 ? 'No pending requests'
-                : `No ${filter || ''} requests`}
+                : filter === 'approved'
+                ? 'No approved requests'
+                : filter === 'rejected'
+                ? 'No rejected requests'
+                : 'No requests found'}
             </h3>
             <p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
               {search

@@ -384,6 +384,7 @@ export default function UsersPage() {
           <select
             value={filterRole}
             onChange={(e) => setFilterRole(e.target.value as any)}
+            aria-label="Filter by role"
             className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500'
           >
             <option value='ALL'>All Roles</option>
@@ -395,6 +396,7 @@ export default function UsersPage() {
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as any)}
+            aria-label="Filter by status"
             className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500'
           >
             <option value='ALL'>All Status</option>
@@ -446,6 +448,7 @@ export default function UsersPage() {
                     <select
                       value={user.role}
                       onChange={(e) => handleRoleChange(user._id, e.target.value as 'ADMIN' | 'REGULAR')}
+                      aria-label={`Change role for ${user.email}`}
                       className={`px-3 py-1 text-xs font-medium rounded-full border ${
                         user.role === 'ADMIN'
                           ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-700'
@@ -472,6 +475,7 @@ export default function UsersPage() {
                     <div className='flex items-center justify-end space-x-2'>
                       <button
                         onClick={() => handleBanToggle(user)}
+                        aria-label={user.isBanned ? `Unban ${user.email}` : `Ban ${user.email}`}
                         className={`p-2 rounded-md transition-colors ${
                           user.isBanned
                             ? 'text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30'
@@ -483,6 +487,7 @@ export default function UsersPage() {
                       </button>
                       <button
                         onClick={() => handleDeleteUser(user._id, user.email)}
+                        aria-label={`Delete ${user.email}`}
                         className='p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-md transition-colors'
                         title='Delete user'
                       >
