@@ -187,15 +187,20 @@ export class AuthService {
     // Consume the invite code after successful user creation
     if (inviteCode) {
       await this.invitesService.validateAndConsumeInvite(inviteCode, user._id)
+      // Invite-registered users are verified by proxy — skip email verification
+      user.emailVerifiedAt = new Date()
     }
 
     user.lastLoginAt = new Date()
     await user.save()
 
-    this.sendEmailVerificationEmail(user).catch((e) => {
-      console.log('Failed to send email verification email')
-      console.log(e)
-    })
+    // Only send email verification for self-registered users (no invite code)
+    if (!inviteCode) {
+      this.sendEmailVerificationEmail(user).catch((e) => {
+        console.log('Failed to send email verification email')
+        console.log(e)
+      })
+    }
 
     setImmediate(() => {
       this.mailService.sendEmailFromTemplate({
