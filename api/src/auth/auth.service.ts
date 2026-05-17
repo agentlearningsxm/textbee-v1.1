@@ -87,12 +87,14 @@ export class AuthService {
         name,
         email,
       })
-      this.mailService.sendEmailFromTemplate({
-        to: user.email,
-        subject: 'Welcome to TextBee - Lets get started!',
-        template: 'welcome-1',
-        context: { name: user.name },
-        from: 'vernu vernu@textbee.dev',
+      setImmediate(() => {
+        this.mailService.sendEmailFromTemplate({
+          to: user.email,
+          subject: 'Welcome to TextBee - Lets get started!',
+          template: 'welcome-1',
+          context: { name: user.name },
+          from: 'vernu vernu@textbee.dev',
+        })
       })
     }
 
@@ -190,17 +192,19 @@ export class AuthService {
     user.lastLoginAt = new Date()
     await user.save()
 
-    this.mailService.sendEmailFromTemplate({
-      to: user.email,
-      subject: 'Welcome to TextBee - Lets get started!',
-      template: 'welcome-1',
-      context: { name: user.name },
-      from: 'vernu vernu@textbee.dev',
-    })
-
     this.sendEmailVerificationEmail(user).catch((e) => {
       console.log('Failed to send email verification email')
       console.log(e)
+    })
+
+    setImmediate(() => {
+      this.mailService.sendEmailFromTemplate({
+        to: user.email,
+        subject: 'Welcome to TextBee - Lets get started!',
+        template: 'welcome-1',
+        context: { name: user.name },
+        from: 'vernu vernu@textbee.dev',
+      })
     })
 
     const payload = { email: user.email, sub: user._id }
@@ -286,11 +290,13 @@ export class AuthService {
     passwordReset.expiresAt = new Date(Date.now())
     await passwordReset.save()
 
-    this.mailService.sendEmailFromTemplate({
-      to: user.email,
-      subject: 'textbee.dev - Password Reset',
-      template: 'password-reset-success',
-      context: { name: user.name },
+    setImmediate(() => {
+      this.mailService.sendEmailFromTemplate({
+        to: user.email,
+        subject: 'textbee.dev - Password Reset',
+        template: 'password-reset-success',
+        context: { name: user.name },
+      })
     })
 
     return { message: 'Password reset successfully' }

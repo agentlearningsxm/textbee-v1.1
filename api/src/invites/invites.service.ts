@@ -43,26 +43,28 @@ export class InvitesService {
 
     const savedInvite = await invite.save()
 
-    // Send invite email if email address was provided
+    // Send invite email (fire-and-forget — don't block response on SMTP timeout)
     if (email) {
       const frontendUrl = process.env.FRONTEND_URL || 'https://textbee.dev'
       const registerUrl = `${frontendUrl}/register?invite=${code}`
 
-      this.mailService
-        .sendEmailFromTemplate({
-          to: email,
-          subject: "You're invited to join TextBee",
-          template: 'invite-email',
-          context: {
-            inviteCode: code,
-            registerUrl,
-            note: note || '',
-            expiresAt: expiresAt.toLocaleDateString(),
-          },
-        })
-        .catch((e) => {
-          console.log(`Failed to send invite email to ${email}:`, e?.message)
-        })
+      setImmediate(() => {
+        this.mailService
+          .sendEmailFromTemplate({
+            to: email,
+            subject: "You're invited to join TextBee",
+            template: 'invite-email',
+            context: {
+              inviteCode: code,
+              registerUrl,
+              note: note || '',
+              expiresAt: expiresAt.toLocaleDateString(),
+            },
+          })
+          .catch((e) => {
+            console.log(`Failed to send invite email to ${email}:`, e?.message)
+          })
+      })
     }
 
     return savedInvite

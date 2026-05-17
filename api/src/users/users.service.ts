@@ -30,11 +30,13 @@ export class UsersService {
     email,
     password,
     phone,
+    emailVerifiedAt,
   }: {
     name: string
     email: string
     password?: string
     phone?: string
+    emailVerifiedAt?: Date
   }) {
     if (await this.findOne({ email })) {
       throw new HttpException(
@@ -50,6 +52,7 @@ export class UsersService {
       email,
       password,
       phone,
+      emailVerifiedAt: emailVerifiedAt || null,
     })
     return await newUser.save()
   }

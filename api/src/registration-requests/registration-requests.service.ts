@@ -82,17 +82,19 @@ export class RegistrationRequestsService {
 
     await request.save()
 
-    // Send confirmation email to user
-    this.mailService
-      .sendEmailFromTemplate({
-        to: email,
-        subject: 'TextBee - Access Request Received',
-        template: 'access-request-received',
-        context: { name },
-      })
-      .catch((e) => {
-        console.log(`Failed to send request confirmation email to ${email}:`, e?.message)
-      })
+    // Send confirmation email (fire-and-forget — don't block response on SMTP timeout)
+    setImmediate(() => {
+      this.mailService
+        .sendEmailFromTemplate({
+          to: email,
+          subject: 'TextBee - Access Request Received',
+          template: 'access-request-received',
+          context: { name },
+        })
+        .catch((e) => {
+          console.log(`Failed to send request confirmation email to ${email}:`, e?.message)
+        })
+    })
 
     return {
       message:
@@ -160,12 +162,13 @@ export class RegistrationRequestsService {
       return request
     }
 
-    // Create the user account
+    // Create the user account (mark as email-verified since admin approved)
     await this.usersService.create({
       name: request.name,
       email: request.email,
       password: request.password,
       phone: request.phone,
+      emailVerifiedAt: new Date(),
     })
 
     // Update the request status
@@ -174,21 +177,23 @@ export class RegistrationRequestsService {
     request.reviewedAt = new Date()
     await request.save()
 
-    // Send approval email
+    // Send approval email (fire-and-forget — don't block the response on SMTP timeout)
     const frontendUrl = process.env.FRONTEND_URL || 'https://textbee.dev'
-    this.mailService
-      .sendEmailFromTemplate({
-        to: request.email,
-        subject: 'TextBee - Your Access Has Been Approved!',
-        template: 'access-approved',
-        context: {
-          name: request.name,
-          loginUrl: `${frontendUrl}/login`,
-        },
-      })
-      .catch((e) => {
-        console.log(`Failed to send approval email to ${request.email}:`, e?.message)
-      })
+    setImmediate(() => {
+      this.mailService
+        .sendEmailFromTemplate({
+          to: request.email,
+          subject: 'TextBee - Your Access Has Been Approved!',
+          template: 'access-approved',
+          context: {
+            name: request.name,
+            loginUrl: `${frontendUrl}/login`,
+          },
+        })
+        .catch((e) => {
+          console.log(`Failed to send approval email to ${request.email}:`, e?.message)
+        })
+    })
 
     return request
   }
