@@ -8,6 +8,7 @@ export const ApiEndpoints = {
     changePassword: () => '/auth/change-password',
 
     whoAmI: () => '/auth/who-am-i',
+    updateOnboarding: () => '/auth/onboarding',
 
     sendEmailVerificationEmail: () => '/auth/send-email-verification-email',
     verifyEmail: () => '/auth/verify-email',
@@ -16,7 +17,10 @@ export const ApiEndpoints = {
     resetPassword: () => '/auth/reset-password',
 
     generateApiKey: () => '/auth/api-keys',
-    listApiKeys: () => '/auth/api-keys',
+    listApiKeys: (status?: 'active' | 'revoked' | 'all') =>
+      status
+        ? `/auth/api-keys?status=${encodeURIComponent(status)}`
+        : '/auth/api-keys',
     revokeApiKey: (id: string) => `/auth/api-keys/${id}/revoke`,
     renameApiKey: (id: string) => `/auth/api-keys/${id}/rename`,
     deleteApiKey: (id: string) => `/auth/api-keys/${id}`,
@@ -33,6 +37,7 @@ export const ApiEndpoints = {
     getWebhookNotifications: () => '/webhooks/notifications',
     createWebhook: () => '/webhooks',
     updateWebhook: (id: string) => `/webhooks/${id}`,
+    deleteWebhook: (id: string) => `/webhooks/${id}`,
     getStats: () => '/gateway/stats',
   },
   billing: {

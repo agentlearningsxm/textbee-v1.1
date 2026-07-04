@@ -36,7 +36,7 @@ Your TextBee instance currently has **partial admin infrastructure** but **no ad
 ### Your Concern: "People can take URL and just sign in to use my app"
 
 **Current Reality:**
-1. Anyone can visit `https://textbee-cloud.vercel.app`
+1. Anyone can visit `https://YOUR_WEB_URL`
 2. Click "Register"
 3. Create account (with bot protection)
 4. Get immediate dashboard access with full SMS gateway functionality
@@ -463,35 +463,35 @@ db.users.updateOne(
 ```bash
 # Test admin endpoint access (should succeed for admin)
 curl -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
-  https://textbee-cloud.onrender.com/api/v1/admin/users
+  https://YOUR_API_URL/api/v1/admin/users
 
 # Test admin endpoint access (should fail for regular user)
 curl -H "Authorization: Bearer REGULAR_JWT_TOKEN" \
-  https://textbee-cloud.onrender.com/api/v1/admin/users
+  https://YOUR_API_URL/api/v1/admin/users
 
 # Test registration without invite (should fail)
-curl -X POST https://textbee-cloud.onrender.com/api/v1/auth/register \
+curl -X POST https://YOUR_API_URL/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"test1234"}'
 
 # Test registration with invalid invite (should fail)
-curl -X POST https://textbee-cloud.onrender.com/api/v1/auth/register \
+curl -X POST https://YOUR_API_URL/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"test1234","inviteCode":"invalid"}'
 
 # Test registration with valid invite (should succeed)
-curl -X POST https://textbee-cloud.onrender.com/api/v1/auth/register \
+curl -X POST https://YOUR_API_URL/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"test1234","inviteCode":"VALID_CODE"}'
 
 # Test banned user login (should fail)
-curl -X POST https://textbee-cloud.onrender.com/api/v1/auth/login \
+curl -X POST https://YOUR_API_URL/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"banned@example.com","password":"password"}'
 ```
 
 ### Frontend Testing
-1. Visit `https://textbee-cloud.vercel.app/register`
+1. Visit `https://YOUR_WEB_URL/register`
    - Should show invite code field
    - Should reject registration without invite
    - Should accept registration with valid invite

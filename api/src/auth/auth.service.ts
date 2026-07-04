@@ -426,14 +426,63 @@ export class AuthService {
     return { apiKey, message: 'Save this key, it wont be shown again ;)' }
   }
 
-  async getUserApiKeys(currentUser: User) {
-    return this.apiKeyModel.find({ user: currentUser._id }, null, {
+  async getUserApiKeys(
+    currentUser: User,
+    statusParam?: string,
+  ) {
+    const normalized =
+      statusParam === undefined || statusParam === '' ? 'active' : statusParam
+    if (!['active', 'revoked', 'all'].includes(normalized)) {
+      throw new HttpException(
+        { error: 'Invalid status. Use active, revoked, or all.' },
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+    const status = normalized as 'active' | 'revoked' | 'all'
+
+    const base = { user: currentUser._id }
+    let filter: Record<string, unknown> = { ...base }
+
+    if (status === 'active') {
+      filter = {
+        ...base,
+        $or: [{ revokedAt: { $exists: false } }, { revokedAt: null }],
+      }
+    } else if (status === 'revoked') {
+      filter = {
+        ...base,
+        revokedAt: { $exists: true, $ne: null },
+      }
+    }
+
+    return this.apiKeyModel.find(filter, null, {
       sort: { createdAt: -1 },
     })
   }
 
   async findApiKey(params) {
     return this.apiKeyModel.findOne(params)
+  }
+
+  /** Prefer exact masked match (see generateApiKey); fall back to legacy prefix regex. */
+  async findActiveApiKeyByClientKey(apiKeyString: string) {
+    const revokedClause = {
+      $or: [{ revokedAt: null }, { revokedAt: { $exists: false } }],
+    }
+    const prefix = apiKeyString.substring(0, 17)
+    const masked = `${prefix}${'*'.repeat(18)}`
+    const byMasked = await this.apiKeyModel.findOne({
+      apiKey: masked,
+      ...revokedClause,
+    })
+    if (byMasked) {
+      return byMasked
+    }
+    const regex = new RegExp(`^${prefix}`, 'g')
+    return this.apiKeyModel.findOne({
+      apiKey: { $regex: regex },
+      ...revokedClause,
+    })
   }
 
   async findApiKeyById(apiKeyId: string) {
@@ -450,6 +499,7 @@ export class AuthService {
         HttpStatus.NOT_FOUND,
       )
     }
+
     // Allow deletion if: never used OR already revoked
     if (apiKey.usageCount > 0 && !apiKey.revokedAt) {
       throw new HttpException(
@@ -503,7 +553,7 @@ export class AuthService {
         })
     }
 
-    this.accessLogModel
+    /* this.accessLogModel
       .create({
         apiKey,
         user,
@@ -518,7 +568,7 @@ export class AuthService {
       .catch((e) => {
         console.log('Failed to track access log')
         console.log(e)
-      })
+      }) */
   }
 
   async validateEmail(email: string) {

@@ -6,7 +6,6 @@ public class AppConstants {
     public static final String API_BASE_URL = BuildConfig.API_BASE_URL;
     public static final String[] requiredPermissions = new String[]{
             Manifest.permission.SEND_SMS,
-            Manifest.permission.READ_SMS,
             Manifest.permission.RECEIVE_SMS,
             Manifest.permission.READ_PHONE_STATE
     };
@@ -31,4 +30,8 @@ public class AppConstants {
     public static final String SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY = "DATASYNC_TIMEOUT_AT";
     /** Cooldown period after dataSync timeout before allowing foreground service restart (ms). */
     public static final long DATASYNC_TIMEOUT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+    /** Consecutive auth failures from pending-SMS polling. Persisted across service restarts. */
+    public static final String SHARED_PREFS_CONSECUTIVE_AUTH_FAILURES_KEY = "CONSECUTIVE_AUTH_FAILURES";
+    public static final String SHARED_PREFS_USE_NEW_UI_KEY = "USE_NEW_UI";
+    public static final String SHARED_PREFS_LAST_HEARTBEAT_MS_KEY = "LAST_HEARTBEAT_MS";
 }

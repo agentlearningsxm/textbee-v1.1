@@ -39,23 +39,37 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: |
-            api/package-lock.json
-            web/package-lock.json
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Build and test API
         run: |
           cd api
-          npm ci --legacy-peer-deps
-          npm run build
-          npm test
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm test
 
       - name: Build web
         run: |
           cd web
-          npm ci --legacy-peer-deps
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm run build
 
   build-and-test-android:
     name: Build and Test Android
@@ -136,4 +150,4 @@ jobs:
         with:
           name: textbee-${{ matrix.variant }}-build-${{ env.SAFE_REF_NAME }}-${{ github.sha }}.apk
           path: android/app/build/outputs/apk/${{ matrix.variant }}/debug/app-${{ matrix.variant }}-debug.apk
-          retention-days: 7 
+          retention-days: 7

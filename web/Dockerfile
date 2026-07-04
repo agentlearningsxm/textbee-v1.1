@@ -4,12 +4,13 @@ WORKDIR /app
 
 # Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
+RUN npm install -g pnpm@9
 
-# Copy package.json and package-lock.json
-COPY package.json package-lock.json ./
+# Copy package.json and pnpm-lock.yaml
+COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN npm ci --legacy-peer-deps
+RUN pnpm install --frozen-lockfile
 
 # Stage 2: Builder
 FROM node:22-alpine AS builder
@@ -17,6 +18,7 @@ WORKDIR /app
 
 # Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
+RUN npm install -g pnpm@9
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -39,7 +41,7 @@ ENV NEXT_PUBLIC_REGISTRATION_MODE=$NEXT_PUBLIC_REGISTRATION_MODE
 ENV NEXT_TELEMETRY_DISABLED 1
 
 # Build the application
-RUN npm run build
+RUN pnpm run build
 
 # Stage 3: Production runner
 FROM node:22-alpine AS runner
@@ -47,6 +49,7 @@ WORKDIR /app
 
 # Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
+RUN npm install -g pnpm@9
 
 # Set environment variables
 ENV NODE_ENV production
@@ -63,6 +66,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/next.config.js ./
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
+COPY --from=builder --chown=nextjs:nodejs /app/pnpm-lock.yaml ./
+
+# Install only production dependencies
+RUN pnpm install --prod --frozen-lockfile
 
 # Switch to non-root user
 USER nextjs

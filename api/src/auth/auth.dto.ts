@@ -49,3 +49,14 @@ export class ResetPasswordInputDTO {
   @ApiProperty({ type: String, required: true })
   newPassword: string
 }
+
+export class UpdateOnboardingDTO {
+  @ApiProperty({ required: false })
+  currentStepId?: string
+
+  @ApiProperty({ required: false, description: 'Only allowed for optional steps' })
+  skipStepId?: string
+
+  @ApiProperty({ required: false, description: 'When true, sets onboarding.completedAt' })
+  complete?: boolean
+}

@@ -6,14 +6,14 @@ services:
     region: oregon
     plan: free
     rootDir: api
-    buildCommand: pnpm install && pnpm run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build
     startCommand: pnpm run start:prod
-    healthCheckPath: /health
+    healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PNPM_VERSION
-        value: "8.15.0"
+        value: "9"
 
   # TextBee Web Service
   - type: web
@@ -22,10 +22,10 @@ services:
     region: oregon
     plan: free
     rootDir: web
-    buildCommand: pnpm install && pnpm run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build
     startCommand: pnpm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PNPM_VERSION
-        value: "8.15.0"
+        value: "9"

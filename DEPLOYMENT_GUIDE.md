@@ -61,10 +61,10 @@ git push origin main
 #### Verify Backend Deployment:
 ```bash
 # Test health endpoint
-curl https://textbee-cloud.onrender.com/api/v1/health
+curl https://YOUR_API_URL/api/v1/health
 
 # Test admin endpoint (should require auth)
-curl https://textbee-cloud.onrender.com/api/v1/admin/stats
+curl https://YOUR_API_URL/api/v1/admin/stats
 # Expected: 401 Unauthorized (correct - needs auth)
 ```
 
@@ -83,7 +83,7 @@ curl https://textbee-cloud.onrender.com/api/v1/admin/stats
 3. Click "Deployments" → "Redeploy"
 
 #### Verify Frontend Deployment:
-1. Visit: https://textbee-cloud.vercel.app/
+1. Visit: https://YOUR_WEB_URL/
 2. Login as admin user
 3. Check for "Admin" link in navigation
 4. Click Admin → Verify dashboard loads
@@ -168,9 +168,9 @@ TURNSTILE_SECRET_KEY=...
 ### Frontend (Vercel):
 Ensure these are set:
 ```
-NEXTAUTH_URL=https://textbee-cloud.vercel.app
+NEXTAUTH_URL=https://YOUR_WEB_URL
 NEXTAUTH_SECRET=...
-NEXT_PUBLIC_API_URL=https://textbee-cloud.onrender.com/api/v1
+NEXT_PUBLIC_API_URL=https://YOUR_API_URL/api/v1
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=...
 ```
 

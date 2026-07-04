@@ -262,14 +262,14 @@ npm run build
 ### Get All Users:
 ```bash
 curl -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
-  https://textbee-cloud.onrender.com/api/v1/admin/users
+  https://YOUR_API_URL/api/v1/admin/users
 ```
 
 ### Ban User:
 ```bash
 curl -X PATCH \
   -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
-  https://textbee-cloud.onrender.com/api/v1/admin/users/USER_ID/ban
+  https://YOUR_API_URL/api/v1/admin/users/USER_ID/ban
 ```
 
 ### Generate Invite Code:
@@ -278,13 +278,13 @@ curl -X POST \
   -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"maxUses": 1, "expiresAt": "2026-02-28T00:00:00.000Z"}' \
-  https://textbee-cloud.onrender.com/api/v1/admin/invites
+  https://YOUR_API_URL/api/v1/admin/invites
 ```
 
 ### Get System Stats:
 ```bash
 curl -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
-  https://textbee-cloud.onrender.com/api/v1/admin/stats
+  https://YOUR_API_URL/api/v1/admin/stats
 ```
 
 ---

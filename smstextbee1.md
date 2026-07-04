@@ -11,7 +11,7 @@ These variables control the User Interface and Authentication.
 
 | Variable | Local Value (`web/.env.local`) | Cloud Value (Vercel) | Purpose |
 | :--- | :--- | :--- | :--- |
-| `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | `https://textbee-cloud.vercel.app` | Base URL of the frontend. |
+| `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | `https://YOUR_WEB_URL` | Base URL of the frontend. |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3001/api/v1` | `https://your-api.onrender.com/api/v1` | URL of the Backend API. |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | `[Your Google Client ID]` | `[Your Google Client ID]` | For "Sign in with Google". |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `0x4AAAAAACLmNM_H0quTJUCj` | `0x4AAAAAACLmNM_H0quTJUCj` | Cloudflare Turnstile Public Key. |
@@ -23,7 +23,7 @@ These variables control the Database, API Logic, and Background Jobs.
 | Variable | Local Value (`api/.env`) | Cloud Value (Render) | Purpose |
 | :--- | :--- | :--- | :--- |
 | `PORT` | `3001` | `10000` (Automatic on Render) | Port the server listens on. |
-| `FRONTEND_URL` | `http://localhost:3000` | `https://textbee-cloud.vercel.app` | URL to redirect users to (e.g., verify email). |
+| `FRONTEND_URL` | `http://localhost:3000` | `https://YOUR_WEB_URL` | URL to redirect users to (e.g., verify email). |
 | `MONGO_URI` | `mongodb://localhost:27017/textbee` | `mongodb+srv://...` | Connection string for MongoDB Atlas. |
 | `JWT_SECRET` | `supersecret` | `[Generate Random String]` | Signing key for Access Tokens. |
 | `CLOUDFLARE_TURNSTILE_SECRET_KEY` | `0x4AAAAAACLmNOGoy7chvqpX-5Wmj8Iu3ag` | `0x4AAAAAACLmNOGoy7chvqpX-5Wmj8Iu3ag` | Cloudflare Turnstile Private Key. |
@@ -37,9 +37,9 @@ These variables control the Database, API Logic, and Background Jobs.
 1.  Go to **[Google Cloud Console](https://console.cloud.google.com/apis/credentials)**.
 2.  Edit your **OAuth 2.0 Client ID**.
 3.  **Authorized JavaScript origins:**
-    *   Add your Vercel URL: `https://textbee-cloud.vercel.app`
+    *   Add your Vercel URL: `https://YOUR_WEB_URL`
 4.  **Authorized redirect URIs:**
-    *   Add: `https://textbee-cloud.vercel.app/api/auth/callback/google`
+    *   Add: `https://YOUR_WEB_URL/api/auth/callback/google`
 
 ### Step 2: Vercel (Frontend) Setup
 1.  Deploy your `web` folder to Vercel.
@@ -51,7 +51,7 @@ These variables control the Database, API Logic, and Background Jobs.
 1.  Deploy your `api` folder to Render (Node.js Service).
 2.  Go to **Environment**.
 3.  Add all variables from the **Backend Table** above (use the **Cloud Value** column).
-    *   **CRITICAL:** Ensure `FRONTEND_URL` points to `https://textbee-cloud.vercel.app`.
+    *   **CRITICAL:** Ensure `FRONTEND_URL` points to `https://YOUR_WEB_URL`.
 
 ---
 

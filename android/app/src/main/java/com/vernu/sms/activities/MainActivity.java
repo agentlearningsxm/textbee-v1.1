@@ -54,9 +54,9 @@ public class MainActivity extends AppCompatActivity {
     private Context mContext;
     private Switch gatewaySwitch, receiveSMSSwitch, stickyNotificationSwitch;
     private EditText apiKeyEditText, fcmTokenEditText, deviceIdEditText, deviceNameEditText, smsSendDelayEditText;
-    private Button registerDeviceBtn, grantSMSPermissionBtn, scanQRBtn, checkUpdatesBtn, configureFilterBtn;
+    private Button registerDeviceBtn, grantSMSPermissionBtn, scanQRBtn, checkUpdatesBtn, configureFilterBtn, tryNewUIBtn;
     private ImageButton copyDeviceIdImgBtn;
-    private TextView deviceBrandAndModelTxt, deviceIdTxt, appVersionNameTxt, appVersionCodeTxt;
+    private TextView deviceBrandAndModelTxt, deviceIdTxt, appVersionNameTxt, appVersionCodeTxt, dashboardLinkText;
     private RadioGroup defaultSimSlotRadioGroup;
     private static final int SCAN_QR_REQUEST_CODE = 49374;
     private static final int PERMISSION_REQUEST_CODE = 0;
@@ -65,6 +65,14 @@ public class MainActivity extends AppCompatActivity {
     private Runnable smsDelaySaveRunnable;
     private String deviceId = null;
     private static final String TAG = "MainActivity";
+
+    private static String buildWebUrl(String path) {
+        String baseUrl = BuildConfig.WEB_BASE_URL;
+        if (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        return baseUrl + path;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,9 +97,11 @@ public class MainActivity extends AppCompatActivity {
         defaultSimSlotRadioGroup = findViewById(R.id.defaultSimSlotRadioGroup);
         appVersionNameTxt = findViewById(R.id.appVersionNameTxt);
         appVersionCodeTxt = findViewById(R.id.appVersionCodeTxt);
+        dashboardLinkText = findViewById(R.id.dashboardLinkText);
         checkUpdatesBtn = findViewById(R.id.checkUpdatesBtn);
         configureFilterBtn = findViewById(R.id.configureFilterBtn);
         smsSendDelayEditText = findViewById(R.id.smsSendDelayEditText);
+        tryNewUIBtn = findViewById(R.id.tryNewUIBtn);
 
         deviceIdTxt.setText(deviceId);
         deviceIdEditText.setText(deviceId);
@@ -101,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
         String versionName = BuildConfig.VERSION_NAME;
         appVersionNameTxt.setText(versionName);
         appVersionCodeTxt.setText(String.valueOf(BuildConfig.VERSION_CODE));
+        dashboardLinkText.setText("Go to " + buildWebUrl("/dashboard"));
         
         // Check for app version changes and report if needed
         if (VersionTracker.hasVersionChanged(mContext)) {
@@ -246,7 +257,7 @@ public class MainActivity extends AppCompatActivity {
         });
         scanQRBtn.setOnClickListener(view -> {
             IntentIntegrator intentIntegrator = new IntentIntegrator(MainActivity.this);
-            intentIntegrator.setPrompt("Go to textbee-cloud.vercel.app/dashboard and click Register Device to generate QR Code");
+            intentIntegrator.setPrompt("Go to " + buildWebUrl("/dashboard") + " and click Register Device to generate QR Code");
             intentIntegrator.setRequestCode(SCAN_QR_REQUEST_CODE);
             intentIntegrator.initiateScan();
         });
@@ -254,7 +265,7 @@ public class MainActivity extends AppCompatActivity {
         checkUpdatesBtn.setOnClickListener(view -> {
             String versionInfo = BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE + ")";
             String encodedVersionInfo = android.net.Uri.encode(versionInfo);
-            String downloadUrl = "https://textbee-cloud.vercel.app/download?currentVersion=" + encodedVersionInfo;
+            String downloadUrl = buildWebUrl("/download?currentVersion=" + encodedVersionInfo);
             Intent browserIntent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl));
             startActivity(browserIntent);
         });
@@ -262,6 +273,13 @@ public class MainActivity extends AppCompatActivity {
         configureFilterBtn.setOnClickListener(view -> {
             Intent filterIntent = new Intent(MainActivity.this, SMSFilterActivity.class);
             startActivity(filterIntent);
+        });
+
+        tryNewUIBtn.setOnClickListener(view -> {
+            SharedPreferenceHelper.setSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_USE_NEW_UI_KEY, true);
+            Intent intent = new Intent(MainActivity.this, com.vernu.sms.ui.splash.SplashActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(intent);
         });
 
         // SMS Send Delay setting: save 3 seconds after user stops typing

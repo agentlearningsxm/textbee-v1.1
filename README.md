@@ -3,16 +3,16 @@
 This is a **self-hosted, fully independent** fork of the TextBee SMS gateway. All services run under your own accounts with zero dependency on the original developer.
 
 - **Technology stack**: React, Next.js, Node.js, NestJs, MongoDB, Android, Java
-- **Dashboard**: [https://textbee-cloud.vercel.app](https://textbee-cloud.vercel.app)
-- **API**: [https://textbee-cloud.onrender.com](https://textbee-cloud.onrender.com)
+- **Dashboard**: `https://YOUR_WEB_URL`
+- **API**: `https://YOUR_API_URL`
 - **GitHub**: [agentlearningsxm/textbee-cloud](https://github.com/agentlearningsxm/textbee-cloud)
 
 ## Self-Hosted Services (All Under Your Control)
 
 | Service | URL | Platform |
 |---------|-----|----------|
-| Web Dashboard | https://textbee-cloud.vercel.app | Vercel |
-| API Backend | https://textbee-cloud.onrender.com | Render |
+| Web Dashboard | `https://YOUR_WEB_URL` | Vercel or VPS |
+| API Backend | `https://YOUR_API_URL` | Render or VPS |
 | Database | MongoDB Atlas (reynubixsms) | MongoDB Atlas |
 | Push Notifications | Firebase (textbee-sms-5f04b) | Firebase |
 
@@ -32,10 +32,10 @@ This is a **self-hosted, fully independent** fork of the TextBee SMS gateway. Al
 
 ## Getting Started
 
-1. Go to [textbee-cloud.vercel.app](https://textbee-cloud.vercel.app) and register or login with your account
-2. Download the APK from [textbee-cloud.vercel.app/download](https://textbee-cloud.vercel.app/download)
+1. Go to `https://YOUR_WEB_URL` and register or login with your account
+2. Download the APK from `https://YOUR_WEB_URL/download`
 3. Open the app and grant the permissions for SMS
-4. Go to [textbee-cloud.vercel.app/dashboard](https://textbee-cloud.vercel.app/dashboard) and click register device/ generate API Key
+4. Go to `https://YOUR_WEB_URL/dashboard` and click register device/ generate API Key
 5. Scan the QR code with the app or enter the API key manually
 6. Enable Sticky Notification for reliable background operation
 7. You are ready to send SMS messages from the dashboard or from your application via the REST API
@@ -46,7 +46,7 @@ This is a **self-hosted, fully independent** fork of the TextBee SMS gateway. Al
 const API_KEY = 'YOUR_API_KEY';
 const DEVICE_ID = 'YOUR_DEVICE_ID';
 
-await axios.post(`https://textbee-cloud.onrender.com/api/v1/gateway/devices/${DEVICE_ID}/send-sms`, {
+await axios.post(`https://YOUR_API_URL/api/v1/gateway/devices/${DEVICE_ID}/send-sms`, {
   recipients: [ '+1234567890' ],
   message: 'Hello World!',
 }, {
@@ -60,7 +60,7 @@ await axios.post(`https://textbee-cloud.onrender.com/api/v1/gateway/devices/${DE
 **Code Snippet**: Curl command to send an SMS message via the REST API
 
 ```bash
-curl -X POST "https://textbee-cloud.onrender.com/api/v1/gateway/devices/YOUR_DEVICE_ID/send-sms" \
+curl -X POST "https://YOUR_API_URL/api/v1/gateway/devices/YOUR_DEVICE_ID/send-sms" \
   -H 'x-api-key: YOUR_API_KEY' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -79,7 +79,7 @@ To receive SMS messages, you can enable the feature from the mobile app. You can
 const API_KEY = 'YOUR_API_KEY';
 const DEVICE_ID = 'YOUR_DEVICE_ID';
 
-await axios.get(`https://textbee-cloud.onrender.com/api/v1/gateway/devices/${DEVICE_ID}/get-received-sms`, {
+await axios.get(`https://YOUR_API_URL/api/v1/gateway/devices/${DEVICE_ID}/get-received-sms`, {
   headers: {
     'x-api-key': API_KEY,
   },
@@ -90,7 +90,7 @@ await axios.get(`https://textbee-cloud.onrender.com/api/v1/gateway/devices/${DEV
 **Code Snippet**: Curl command to fetch received SMS messages
 
 ```bash
-curl -X GET "https://textbee-cloud.onrender.com/api/v1/gateway/devices/YOUR_DEVICE_ID/get-received-sms"\
+curl -X GET "https://YOUR_API_URL/api/v1/gateway/devices/YOUR_DEVICE_ID/get-received-sms"\
   -H "x-api-key: YOUR_API_KEY"
 ```
 

@@ -633,7 +633,7 @@
                             android:id="@+id/dashboardLinkText"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Go to https://textbee-cloud.vercel.app/dashboard"
+                            android:text="Go to https://YOUR_WEB_URL/dashboard"
                             android:textColor="?attr/colorPrimary"
                             android:autoLink="web"
                             android:linksClickable="true"
@@ -787,6 +787,18 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:text="Check for Updates"
+                                android:textColor="?attr/colorPrimary"
+                                android:background="@android:color/transparent"
+                                android:textAllCaps="false"
+                                android:paddingHorizontal="0dp"
+                                style="@style/Widget.AppCompat.Button.Borderless" />
+
+                            <Button
+                                android:id="@+id/tryNewUIBtn"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="✨ Try New UI"
                                 android:textColor="?attr/colorPrimary"
                                 android:background="@android:color/transparent"
                                 android:textAllCaps="false"

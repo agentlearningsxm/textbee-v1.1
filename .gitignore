@@ -3,3 +3,28 @@
 *-monitor
 
 .cursor
+.claude/
+.omc/
+
+# Local secrets and generated artifacts
+.env
+.env.*
+!.env.example
+*.log
+logs/*
+!logs/README.md
+!logs/*/
+!logs/*/README.md
+!logs/*/*/
+!logs/*/*/README.md
+!logs/**/*.md
+*.apk
+!web/public/textbee-selfhosted.apk
+android/debug.keystore
+*deploy*.json
+failed_*.json
+failed_*.txt
+latest_*.json
+run_check.json
+service*.json
+services*.json

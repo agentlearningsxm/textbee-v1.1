@@ -2,26 +2,35 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 
-# Copy package.json and package-lock.json
-COPY package.json package-lock.json ./
+# Install pnpm
+RUN npm install -g pnpm@9
+
+# Copy package.json and pnpm-lock.yaml
+COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN npm ci --legacy-peer-deps --include=dev
+RUN pnpm install --frozen-lockfile
 
 # Stage 2: Builder
 FROM node:22-alpine AS builder
 WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm@9
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Build the application
-RUN npm run build
+RUN pnpm run build
 
 # Stage 3: Production
 FROM node:22-alpine AS runner
 WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm@9
 
 # Set NODE_ENV to production
 ENV NODE_ENV production
@@ -29,10 +38,10 @@ ENV NODE_ENV production
 # Copy necessary files for production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
-COPY --from=builder /app/package-lock.json ./
+COPY --from=builder /app/pnpm-lock.yaml ./
 
 # Install only production dependencies
-RUN npm ci --omit=dev --legacy-peer-deps
+RUN pnpm install --prod --frozen-lockfile
 
 # Add a non-root user
 RUN addgroup --system --gid 1001 nodejs && \
@@ -42,7 +51,7 @@ USER nestjs
 
 # Expose the port specified by the PORT environment variable (default: 3001)
 ENV PORT 3003
-EXPOSE 3003
+EXPOSE ${PORT}
 
 # Command to run the application
 CMD ["node", "dist/main"]

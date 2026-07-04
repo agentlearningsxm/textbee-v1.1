@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common'
@@ -17,15 +18,20 @@ import {
   RegisterInputDTO,
   RequestResetPasswordInputDTO,
   ResetPasswordInputDTO,
+  UpdateOnboardingDTO,
 } from './auth.dto'
 import { AuthGuard } from './guards/auth.guard'
 import { AuthService } from './auth.service'
+import { UsersService } from '../users/users.service'
 import { CanModifyApiKey } from './guards/can-modify-api-key.guard'
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private usersService: UsersService,
+  ) {}
 
   @ApiOperation({ summary: 'Login' })
   @HttpCode(HttpStatus.OK)
@@ -93,10 +99,20 @@ export class AuthController {
 
   @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Get Api Key List (masked***)' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['active', 'revoked', 'all'],
+    description:
+      'Filter keys: active (default), revoked only, or all (legacy full list)',
+  })
   @ApiBearerAuth()
   @Get('/api-keys')
-  async getApiKey(@Request() req) {
-    const data = await this.authService.getUserApiKeys(req.user)
+  async getApiKey(
+    @Request() req,
+    @Query('status') status?: string,
+  ) {
+    const data = await this.authService.getUserApiKeys(req.user, status)
     return { data }
   }
 
@@ -128,6 +144,18 @@ export class AuthController {
   async renameApiKey(@Param() params, @Body() input: { name: string }) {
     await this.authService.renameApiKey(params.id, input.name)
     return { message: 'API Key Renamed' }
+  }
+
+  @ApiOperation({ summary: 'Update dashboard onboarding progress' })
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  @Patch('/onboarding')
+  async updateOnboarding(
+    @Body() input: UpdateOnboardingDTO,
+    @Request() req,
+  ) {
+    const user = await this.usersService.updateOnboarding(input, req.user)
+    return { data: user }
   }
 
   @ApiOperation({ summary: 'Request Password Reset' })

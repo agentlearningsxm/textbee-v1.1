@@ -25,41 +25,46 @@ import {
 export default function CommunityLinks() {
   const [socialOpen, setSocialOpen] = useState(false)
   const [copiedUrl, setCopiedUrl] = useState('')
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://YOUR_WEB_URL'
+  const encodedSiteUrl = encodeURIComponent(siteUrl)
+  const encodedShareText = encodeURIComponent(
+    `Check out TextBee Cloud - a self-hosted SMS gateway platform: ${siteUrl}`
+  )
   const socials = [
     {
       icon: '/images/facebook.svg',
       name: 'Facebook',
-      url: 'https://www.facebook.com/sharer/sharer.php?u=https://textbee-cloud.vercel.app',
+      url: `https://www.facebook.com/sharer/sharer.php?u=${encodedSiteUrl}`,
     },
     {
       icon: '/images/x.svg',
       name: 'Twitter',
-      url: 'https://twitter.com/intent/tweet?url=https://textbee-cloud.vercel.app&text=🚀+Just+discovered+@TextBeeCloud+-+an+amazing+SMS+gateway+platform!+Perfect+for+those+who+need+reliable+sms+integration.',
+      url: `https://twitter.com/intent/tweet?url=${encodedSiteUrl}&text=${encodedShareText}`,
     },
     {
       icon: '/images/linkedin2.svg',
       name: 'LinkedIn',
-      url: 'https://www.linkedin.com/sharing/share-offsite/?url=https://textbee-cloud.vercel.app',
+      url: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedSiteUrl}`,
     },
     {
       icon: '/images/reddit.svg',
       name: 'Reddit',
-      url: 'https://www.reddit.com/submit?url=https://textbee-cloud.vercel.app&title=TextBee Cloud+-+Developer-friendly+SMS+Gateway+Platform',
+      url: `https://www.reddit.com/submit?url=${encodedSiteUrl}&title=TextBee Cloud+-+Developer-friendly+SMS+Gateway+Platform`,
     },
     {
       icon: '/images/whatsapp.svg',
       name: 'WhatsApp',
-      url: "https://api.whatsapp.com/send?text=Hey!+Check+out+TextBee Cloud+-+it's+a+fantastic+SMS+gateway+platform+perfect+for+those+who+need+reliable+sms+integration+🚀+https://textbee-cloud.vercel.app",
+      url: `https://api.whatsapp.com/send?text=${encodedShareText}`,
     },
     {
       icon: '/images/telegram.svg',
       name: 'Telegram',
-      url: 'https://t.me/share/url?url=https://textbee-cloud.vercel.app&text=🔥+Found+an+awesome+SMS+gateway+platform+-+TextBee Cloud!+Great+for+those+who+need+reliable+sms+integration.',
+      url: `https://t.me/share/url?url=${encodedSiteUrl}&text=${encodedShareText}`,
     },
     {
       icon: '/images/gmail.svg',
       name: 'Email',
-      url: "mailto:?subject=Check+out+TextBee Cloud+-+SMS+Gateway+Platform&body=Hi!%0A%0AI+wanted+to+share+TextBee Cloud+with+you+-+it's+an+excellent+SMS+gateway+platform+that's+perfect+for+those+who+need+reliable+sms+integration.%0A%0ACheck+it+out:+https://textbee-cloud.vercel.app%0A%0ABest+regards!",
+      url: `mailto:?subject=Check+out+TextBee Cloud+-+SMS+Gateway+Platform&body=${encodedShareText}`,
     },
   ]
   const [currentUrl, setCurrentUrl] = useState(socials[0].url)

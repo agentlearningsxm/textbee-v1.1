@@ -3,15 +3,41 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Smartphone, Battery, Signal, Copy, Trash2 } from 'lucide-react'
+import {
+  Smartphone,
+  Battery,
+  Signal,
+  Copy,
+  Plus,
+  ExternalLink,
+  Loader2,
+  MoreVertical,
+} from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import httpBrowserClient from '@/lib/httpBrowserClient'
 import { ApiEndpoints } from '@/config/api'
 import { Routes } from '@/config/routes'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { formatDeviceName } from '@/lib/utils'
+import GenerateApiKey, {
+  type GenerateApiKeyHandle,
+} from './generate-api-key'
 import {
   DeviceVersionCandidate,
   getDeviceVersionCode,
@@ -19,7 +45,18 @@ import {
   latestAppVersionCode,
 } from './update-app-helpers'
 
+type DeviceRow = DeviceVersionCandidate & {
+  createdAt: string
+  status?: string
+  enabled?: boolean
+}
+
 export default function DeviceList() {
+  const addDeviceKeyRef = useRef<GenerateApiKeyHandle>(null)
+  const [addDeviceInstructionOpen, setAddDeviceInstructionOpen] =
+    useState(false)
+  const [devicePendingDelete, setDevicePendingDelete] =
+    useState<DeviceRow | null>(null)
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const {
@@ -35,18 +72,31 @@ export default function DeviceList() {
     // select: (res) => res.data,
   })
 
-  const deleteDeviceMutation = useMutation({
-    mutationFn: (deviceId: string) =>
-      httpBrowserClient.delete(ApiEndpoints.gateway.deleteDevice(deviceId)),
+  const {
+    mutate: deleteDevice,
+    isPending: isDeletingDevice,
+  } = useMutation({
+    mutationFn: (id: string) =>
+      httpBrowserClient.delete(ApiEndpoints.gateway.deleteDevice(id)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
-      toast({ title: 'Device deleted successfully' })
-    },
-    onError: (error: any) => {
+      setDevicePendingDelete(null)
       toast({
-        title: 'Failed to delete device',
-        description: error.response?.data?.error || error.message,
+        title: 'Device removed',
+      })
+      void queryClient.invalidateQueries({ queryKey: ['devices'] })
+    },
+    onError: (err: unknown) => {
+      const message =
+        err &&
+        typeof err === 'object' &&
+        'message' in err &&
+        typeof (err as { message: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Something went wrong'
+      toast({
         variant: 'destructive',
+        title: 'Error removing device',
+        description: message,
       })
     },
   })
@@ -59,10 +109,20 @@ export default function DeviceList() {
   }
 
   return (
-    <Card>
-      <CardHeader className='pb-2'>
-        <CardTitle className='text-lg'>Registered Devices</CardTitle>
-      </CardHeader>
+    <>
+      <GenerateApiKey ref={addDeviceKeyRef} showTrigger={false} />
+      <Card>
+        <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+          <CardTitle className='text-lg'>Registered Devices</CardTitle>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => setAddDeviceInstructionOpen(true)}
+          >
+            <Plus className='mr-1 h-4 w-4' />
+            Add device
+          </Button>
+        </CardHeader>
       <CardContent>
           <div className='space-y-2'>
             {isPending && (
@@ -70,8 +130,8 @@ export default function DeviceList() {
                 {[1, 2, 3].map((i) => (
                   <Card key={i} className='border-0 shadow-none'>
                     <CardContent className='flex items-center p-3'>
-                      <Skeleton className='h-6 w-6 rounded-full mr-3' />
-                      <div className='flex-1'>
+                      <Skeleton className='h-6 w-6 rounded-full mr-3 shrink-0' />
+                      <div className='min-w-0 flex-1'>
                         <div className='flex items-center justify-between'>
                           <Skeleton className='h-4 w-[120px]' />
                           <Skeleton className='h-4 w-[60px]' />
@@ -83,6 +143,7 @@ export default function DeviceList() {
                           <Skeleton className='h-3 w-[200px]' />
                         </div>
                       </div>
+                      <Skeleton className='h-6 w-6 shrink-0' />
                     </CardContent>
                   </Card>
                 ))}
@@ -103,9 +164,9 @@ export default function DeviceList() {
 
             {devices?.data?.map((device) => (
               <Card key={device._id} className='border-0 shadow-none'>
-                <CardContent className='flex items-center p-3'>
-                  <Smartphone className='h-6 w-6 mr-3' />
-                  <div className='flex-1'>
+                <CardContent className='flex items-center gap-1 p-3'>
+                  <Smartphone className='h-6 w-6 mr-2 shrink-0' />
+                  <div className='min-w-0 flex-1'>
                     <div className='flex items-center justify-between'>
                       <h3 className='font-semibold text-sm'>
                         {formatDeviceName(device)}
@@ -189,24 +250,138 @@ export default function DeviceList() {
                       </div>
                     )}
                   </div>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    className='h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10'
-                    onClick={() => {
-                      if (confirm('Are you sure you want to delete this device?')) {
-                        deleteDeviceMutation.mutate(device._id)
-                      }
-                    }}
-                    disabled={deleteDeviceMutation.isPending}
-                  >
-                    <Trash2 className='h-4 w-4' />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-8 w-8 shrink-0'
+                        aria-label='Device actions'
+                      >
+                        <MoreVertical className='h-4 w-4' />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end'>
+                      <DropdownMenuItem
+                        className='text-destructive focus:text-destructive'
+                        onClick={() =>
+                          setDevicePendingDelete(device as DeviceRow)
+                        }
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </CardContent>
               </Card>
             ))}
           </div>
       </CardContent>
-    </Card>
+      </Card>
+
+      <Dialog
+        open={addDeviceInstructionOpen}
+        onOpenChange={setAddDeviceInstructionOpen}
+      >
+        <DialogContent className='sm:max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Add a device</DialogTitle>
+            <DialogDescription className='text-left'>
+              Register a new device by scanning the QR code or pasting the API key.
+            </DialogDescription>
+          </DialogHeader>
+          <ol className='list-decimal space-y-3 pl-5 text-left text-sm text-muted-foreground'>
+            <li>
+              Download textbee app from{' '}
+              <a
+                href={Routes.downloadAndroidApp}
+                target='_blank'
+                rel='noreferrer'
+                className='font-medium text-primary underline-offset-4 hover:underline'
+              >
+                {Routes.downloadAndroidApp}
+              </a>
+              , install it, and grant SMS permissions.
+            </li>
+            <li>
+              Tap Continue to create a new API key and get a QR
+              code in the next dialog. If you already have an active API key, you can paste it in the
+              app instead
+            </li>
+            <li>
+              Open the textbee.dev app and scan the QR code or paste the key manually. Your device should appear in the list when the link succeeds.
+            </li>
+          </ol>
+          <DialogFooter className='flex-col gap-2 sm:flex-row sm:justify-between'>
+            <Button variant='outline' size='sm' asChild>
+              <a href={Routes.quickstart} target='_blank' rel='noreferrer'>
+                Full guide
+                <ExternalLink className='ml-1 h-3 w-3' />
+              </a>
+            </Button>
+            <div className='flex w-full gap-2 sm:w-auto'>
+              <Button
+                variant='outline'
+                size='sm'
+                className='flex-1 sm:flex-none'
+                onClick={() => setAddDeviceInstructionOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size='sm'
+                className='flex-1 sm:flex-none'
+                onClick={() => {
+                  setAddDeviceInstructionOpen(false)
+                  addDeviceKeyRef.current?.open()
+                }}
+              >
+                Continue
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!devicePendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setDevicePendingDelete(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove this device?</DialogTitle>
+            <DialogDescription>
+              {devicePendingDelete
+                ? `This removes ${formatDeviceName(devicePendingDelete)} from your account. You will not be able to send or receive SMS through it until you register the app again.`
+                : 'This removes the device from your account. You will not be able to send or receive SMS through it until you register the app again.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => setDevicePendingDelete(null)}
+              disabled={isDeletingDevice}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={() =>
+                devicePendingDelete &&
+                deleteDevice(devicePendingDelete._id)
+              }
+              disabled={isDeletingDevice}
+            >
+              {isDeletingDevice ? (
+                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+              ) : null}
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

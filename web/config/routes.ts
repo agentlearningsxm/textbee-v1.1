@@ -1,3 +1,5 @@
+const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001/api/v1').replace(/\/$/, '')
+
 export const Routes = {
   landingPage: '/',
   contribute: '/contribute',
@@ -16,5 +18,5 @@ export const Routes = {
   privacyPolicy: '/dashboard', // Self-hosted: no external policy page
   refundPolicy: '/dashboard', // Self-hosted: no external policy page
   termsOfService: '/dashboard', // Self-hosted: no external policy page
-  statusPage: 'https://textbee-cloud.onrender.com/api/v1/health', // Your API health endpoint
+  statusPage: `${apiBaseUrl}/health`,
 }

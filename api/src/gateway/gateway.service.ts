@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import { Device, DeviceDocument } from './schemas/device.schema'
 import { Model, Types } from 'mongoose'
 import * as firebaseAdmin from 'firebase-admin'
+import { DeviceTombstone, DeviceTombstoneDocument } from './schemas/device-tombstone.schema'
 import {
   ReceivedSMSDTO,
   RegisterDeviceInputDTO,
@@ -28,6 +29,8 @@ import { SmsQueueService } from './queue/sms-queue.service'
 export class GatewayService {
   constructor(
     @InjectModel(Device.name) private deviceModel: Model<DeviceDocument>,
+    @InjectModel(DeviceTombstone.name)
+    private deviceTombstoneModel: Model<DeviceTombstoneDocument>,
     @InjectModel(SMS.name) private smsModel: Model<SMS>,
     @InjectModel(SMSBatch.name) private smsBatchModel: Model<SMSBatch>,
     private authService: AuthService,
@@ -52,12 +55,18 @@ export class GatewayService {
     input: RegisterDeviceInputDTO,
     user: User,
   ): Promise<any> {
-    const device = await this.deviceModel.findOne({
+    // Mongoose 9.6's strict types collide on the reserved `model` field name
+    // (it expects Mongoose's `Model<any>` shape, not the device's `model`
+    // schema field). Cast the filter to bypass the type check; runtime
+    // behavior is unchanged.
+    const deviceFilter = {
       user: user._id,
       model: input.model,
       buildId: input.buildId,
-    })
+    } as any
+    const device = await this.deviceModel.findOne(deviceFilter)
 
+    const now = new Date()
     const deviceData: any = { ...input, user }
 
     // Set default name to "brand model" if not provided
@@ -69,8 +78,14 @@ export class GatewayService {
     if (input.simInfo) {
       deviceData.simInfo = {
         ...input.simInfo,
-        lastUpdated: input.simInfo.lastUpdated || new Date(),
+        lastUpdated: input.simInfo.lastUpdated || now,
       }
+    }
+
+    if (input.fcmToken) {
+      deviceData.fcmTokenUpdatedAt = now
+      deviceData.fcmTokenInvalidatedAt = undefined
+      deviceData.fcmTokenInvalidReason = undefined
     }
 
     if (device && device.appVersionCode <= 11) {
@@ -110,14 +125,21 @@ export class GatewayService {
       input.enabled = true;
     }
 
+    const now = new Date()
     const updateData: any = { ...input }
     
     // Handle simInfo if provided
     if (input.simInfo) {
       updateData.simInfo = {
         ...input.simInfo,
-        lastUpdated: input.simInfo.lastUpdated || new Date(),
+        lastUpdated: input.simInfo.lastUpdated || now,
       }
+    }
+
+    if (input.fcmToken && input.fcmToken !== device.fcmToken) {
+      updateData.fcmTokenUpdatedAt = now
+      updateData.fcmTokenInvalidatedAt = undefined
+      updateData.fcmTokenInvalidReason = undefined
     }
     
     return await this.deviceModel.findByIdAndUpdate(
@@ -139,9 +161,21 @@ export class GatewayService {
       )
     }
 
-    // Actually delete the device
+    await this.deviceTombstoneModel.updateOne(
+      { deviceId: new Types.ObjectId(deviceId) },
+      {
+        $setOnInsert: {
+          deviceId: new Types.ObjectId(deviceId),
+          userId: device.user,
+          deletedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    )
+
     await this.deviceModel.findByIdAndDelete(deviceId)
-    return { message: 'Device deleted successfully' }
+
+    return { success: true }
   }
 
   private calculateDelayFromScheduledAt(scheduledAt?: string): number | undefined {
@@ -255,6 +289,7 @@ export class GatewayService {
 
     try {
       smsBatch = await this.smsBatchModel.create({
+        user: device.user,
         device: device._id,
         message,
         recipientCount: recipients.length,
@@ -277,6 +312,7 @@ export class GatewayService {
     for (let recipient of recipients) {
       recipient = recipient.replace(/\s+/g, "")
       const sms = await this.smsModel.create({
+        user: device.user,
         device: device._id,
         smsBatch: smsBatch._id,
         message: message,
@@ -475,6 +511,7 @@ export class GatewayService {
     const { messageTemplate, messages } = body
 
     const smsBatch = await this.smsBatchModel.create({
+      user: device.user,
       device: device._id,
       message: messageTemplate,
       recipientCount: messages
@@ -488,6 +525,13 @@ export class GatewayService {
 
     // Track FCM messages with their calculated delays for grouping
     const fcmMessagesWithDelays: Array<{ message: Message; delayMs?: number }> = []
+    const smsDocumentsToInsert: Array<Record<string, any>> = []
+    const smsToFcmMetadata: Array<{
+      recipient: string
+      message: string
+      simSubscriptionId?: number
+      delayMs?: number
+    }> = []
 
     for (const smsData of messages) {
       const message = smsData.message
@@ -505,8 +549,9 @@ export class GatewayService {
       const delayMs = this.calculateDelayFromScheduledAt(smsData.scheduledAt)
 
       for (let recipient of recipients) {
-        recipient =  recipient.replace(/\s+/g, "")
-        const sms = await this.smsModel.create({
+        recipient = recipient.replace(/\s+/g, "")
+        smsDocumentsToInsert.push({
+          user: device.user,
           device: device._id,
           smsBatch: smsBatch._id,
           message: message,
@@ -518,32 +563,73 @@ export class GatewayService {
             simSubscriptionId: smsData.simSubscriptionId,
           }),
         })
-        const updatedSMSData = {
-          smsId: sms._id,
-          smsBatchId: smsBatch._id,
+        smsToFcmMetadata.push({
+          recipient,
           message,
-          recipients: [recipient],
           ...(smsData.simSubscriptionId !== undefined && {
             simSubscriptionId: smsData.simSubscriptionId,
           }),
-
-          // Legacy fields to be removed in the future
-          smsBody: message,
-          receivers: [recipient],
-        }
-        const stringifiedSMSData = JSON.stringify(updatedSMSData)
-
-        const fcmMessage: Message = {
-          data: {
-            smsData: stringifiedSMSData,
-          },
-          token: device.fcmToken,
-          android: {
-            priority: 'high',
-          },
-        }
-        fcmMessagesWithDelays.push({ message: fcmMessage, delayMs })
+          delayMs,
+        })
       }
+    }
+
+    const insertChunkSize = 500
+    const insertedSmsDocs: any[] = []
+    const hasInsertMany = typeof (this.smsModel as any).insertMany === 'function'
+    for (let i = 0; i < smsDocumentsToInsert.length; i += insertChunkSize) {
+      const chunk = smsDocumentsToInsert.slice(i, i + insertChunkSize)
+      if (hasInsertMany) {
+        const insertedChunk = await (this.smsModel as any).insertMany(chunk, { ordered: true })
+        insertedSmsDocs.push(...insertedChunk)
+        continue
+      }
+
+      // Fallback for mocked/non-standard models that don't expose insertMany
+      for (const smsDocument of chunk) {
+        const createdSmsDoc = await this.smsModel.create(smsDocument)
+        insertedSmsDocs.push(createdSmsDoc)
+      }
+    }
+
+    if (insertedSmsDocs.length !== smsToFcmMetadata.length) {
+      throw new HttpException(
+        {
+          success: false,
+          error: 'Failed to map created SMS records to queue payload',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      )
+    }
+
+    for (let i = 0; i < insertedSmsDocs.length; i++) {
+      const sms = insertedSmsDocs[i]
+      const metadata = smsToFcmMetadata[i]
+      const updatedSMSData = {
+        smsId: sms._id,
+        smsBatchId: smsBatch._id,
+        message: metadata.message,
+        recipients: [metadata.recipient],
+        ...(metadata.simSubscriptionId !== undefined && {
+          simSubscriptionId: metadata.simSubscriptionId,
+        }),
+
+        // Legacy fields to be removed in the future
+        smsBody: metadata.message,
+        receivers: [metadata.recipient],
+      }
+      const stringifiedSMSData = JSON.stringify(updatedSMSData)
+
+      const fcmMessage: Message = {
+        data: {
+          smsData: stringifiedSMSData,
+        },
+        token: device.fcmToken,
+        android: {
+          priority: 'high',
+        },
+      }
+      fcmMessagesWithDelays.push({ message: fcmMessage, delayMs: metadata.delayMs })
     }
 
     // Check if we should use the queue
@@ -703,7 +789,7 @@ export class GatewayService {
       !dto.sender ||
       !dto.message
     ) {
-      console.log('Invalid received SMS data')
+      console.error(`receiveSMS: Invalid received SMS data (sender: ${dto.sender}, message: ${dto.message}) (receivedAt: ${dto.receivedAt}, receivedAtInMillis: ${dto.receivedAtInMillis})`)
       throw new HttpException(
         {
           success: false,
@@ -747,6 +833,7 @@ export class GatewayService {
     }
 
     const sms = await this.smsModel.create({
+      user: device.user,
       device: device._id,
       message: dto.message,
       type: SMSType.RECEIVED,
@@ -1166,6 +1253,9 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     // Update FCM token if provided and different
     if (input.fcmToken && input.fcmToken !== device.fcmToken) {
       updateData.fcmToken = input.fcmToken
+      updateData.fcmTokenUpdatedAt = now
+      updateData.fcmTokenInvalidatedAt = undefined
+      updateData.fcmTokenInvalidReason = undefined
       fcmTokenUpdated = true
     }
 

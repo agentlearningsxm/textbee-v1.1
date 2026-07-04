@@ -151,7 +151,7 @@ export class AdminService {
       email: data.email,
       password: hashedPassword,
       phone: data.phone,
-      emailVerified: true,
+      emailVerifiedAt: new Date(),
     })
     await user.save()
 
