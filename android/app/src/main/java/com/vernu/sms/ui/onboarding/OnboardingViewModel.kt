@@ -97,6 +97,7 @@ class OnboardingViewModel : ViewModel() {
                 }
                 val input = RegisterDeviceInputDTO().apply {
                     this.fcmToken = fcmToken
+                    enabled = true
                     brand = Build.BRAND
                     manufacturer = Build.MANUFACTURER
                     model = Build.MODEL
