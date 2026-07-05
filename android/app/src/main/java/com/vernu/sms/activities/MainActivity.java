@@ -25,7 +25,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.google.android.material.snackbar.Snackbar;
-import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 import com.vernu.sms.ApiManager;
@@ -36,10 +35,10 @@ import com.vernu.sms.R;
 import com.vernu.sms.dtos.RegisterDeviceInputDTO;
 import com.vernu.sms.dtos.RegisterDeviceResponseDTO;
 import com.vernu.sms.dtos.SimInfoCollectionDTO;
+import com.vernu.sms.firebase.SafeFirebase;
 import com.vernu.sms.helpers.SharedPreferenceHelper;
 import com.vernu.sms.helpers.VersionTracker;
 import com.vernu.sms.helpers.HeartbeatManager;
-import com.google.firebase.crashlytics.FirebaseCrashlytics;
 import com.google.gson.Gson;
 import okhttp3.ResponseBody;
 import java.io.IOException;
@@ -119,12 +118,11 @@ public class MainActivity extends AppCompatActivity {
             VersionTracker.reportVersionToServer(mContext);
         }
         
-        // Initialize Crashlytics with user information
-        FirebaseCrashlytics crashlytics = FirebaseCrashlytics.getInstance();
-        crashlytics.setCustomKey("device_id", deviceId != null ? deviceId : "not_registered");
-        crashlytics.setCustomKey("device_model", Build.MODEL);
-        crashlytics.setCustomKey("app_version", versionName);
-        crashlytics.setCustomKey("app_version_code", BuildConfig.VERSION_CODE);
+        // Initialize Crashlytics with user information when Firebase is available
+        SafeFirebase.setCrashlyticsCustomKey(mContext, "device_id", deviceId != null ? deviceId : "not_registered");
+        SafeFirebase.setCrashlyticsCustomKey(mContext, "device_model", Build.MODEL);
+        SafeFirebase.setCrashlyticsCustomKey(mContext, "app_version", versionName);
+        SafeFirebase.setCrashlyticsCustomKey(mContext, "app_version_code", BuildConfig.VERSION_CODE);
 
         // Start sticky notification service if enabled
         boolean gatewayEnabled = SharedPreferenceHelper.getSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, false);
@@ -510,16 +508,12 @@ public class MainActivity extends AppCompatActivity {
         registerDeviceBtn.setText("Loading...");
         View view = findViewById(R.id.registerDeviceBtn);
 
-        FirebaseMessaging.getInstance().getToken()
-                .addOnCompleteListener(task -> {
-                    if (!task.isSuccessful()) {
-                        Snackbar.make(view, "Failed to obtain FCM Token :(", Snackbar.LENGTH_LONG).show();
-                        registerDeviceBtn.setEnabled(true);
-                        registerDeviceBtn.setText("Update");
-                        return;
+        SafeFirebase.getFcmToken(mContext, token -> {
+                    if (token != null) {
+                        fcmTokenEditText.setText(token);
+                    } else {
+                        fcmTokenEditText.setText("");
                     }
-                    String token = task.getResult();
-                    fcmTokenEditText.setText(token);
 
                     RegisterDeviceInputDTO registerDeviceInput = new RegisterDeviceInputDTO();
                     registerDeviceInput.setEnabled(true);
@@ -689,16 +683,12 @@ public class MainActivity extends AppCompatActivity {
         registerDeviceBtn.setText("Loading...");
         View view = findViewById(R.id.registerDeviceBtn);
 
-        FirebaseMessaging.getInstance().getToken()
-                .addOnCompleteListener(task -> {
-                    if (!task.isSuccessful()) {
-                        Snackbar.make(view, "Failed to obtain FCM Token :(", Snackbar.LENGTH_LONG).show();
-                        registerDeviceBtn.setEnabled(true);
-                        registerDeviceBtn.setText("Update");
-                        return;
+        SafeFirebase.getFcmToken(mContext, token -> {
+                    if (token != null) {
+                        fcmTokenEditText.setText(token);
+                    } else {
+                        fcmTokenEditText.setText("");
                     }
-                    String token = task.getResult();
-                    fcmTokenEditText.setText(token);
 
                     RegisterDeviceInputDTO updateDeviceInput = new RegisterDeviceInputDTO();
                     updateDeviceInput.setEnabled(true);

@@ -4,13 +4,13 @@ import android.content.Context
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.messaging.FirebaseMessaging
 import com.vernu.sms.ApiManagerKt
 import com.vernu.sms.AppConstants
 import com.vernu.sms.BuildConfig
 import com.vernu.sms.TextBeeUtils
 import com.vernu.sms.dtos.RegisterDeviceInputDTO
 import com.vernu.sms.dtos.SimInfoCollectionDTO
+import com.vernu.sms.firebase.SafeFirebase
 import com.vernu.sms.helpers.HeartbeatManager
 import com.vernu.sms.helpers.SharedPreferenceHelper
 import kotlinx.coroutines.channels.Channel
@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 data class OnboardingState(
@@ -91,7 +90,7 @@ class OnboardingViewModel : ViewModel() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                val fcmToken = getFcmToken()
+                val fcmToken = getFcmToken(context)
                 val collectedSimInfo = SimInfoCollectionDTO().apply {
                     lastUpdated = System.currentTimeMillis()
                     sims = TextBeeUtils.collectSimInfo(context)
@@ -177,9 +176,9 @@ class OnboardingViewModel : ViewModel() {
         }
     }
 
-    private suspend fun getFcmToken(): String = suspendCoroutine { cont ->
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { token -> cont.resume(token) }
-            .addOnFailureListener { e -> cont.resumeWithException(e) }
+    private suspend fun getFcmToken(context: Context): String? = suspendCoroutine { cont ->
+        SafeFirebase.getFcmToken(context) { token ->
+            cont.resume(token)
+        }
     }
 }

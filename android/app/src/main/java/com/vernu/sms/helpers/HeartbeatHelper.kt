@@ -8,13 +8,13 @@ import android.os.BatteryManager
 import android.os.StatFs
 import android.os.SystemClock
 import android.util.Log
-import com.google.firebase.messaging.FirebaseMessaging
 import com.vernu.sms.ApiManager
 import com.vernu.sms.AppConstants
 import com.vernu.sms.BuildConfig
 import com.vernu.sms.TextBeeUtils
 import com.vernu.sms.dtos.HeartbeatInputDTO
 import com.vernu.sms.dtos.SimInfoCollectionDTO
+import com.vernu.sms.firebase.SafeFirebase
 import java.io.IOException
 import java.util.Locale
 import java.util.TimeZone
@@ -42,8 +42,8 @@ object HeartbeatHelper {
             try {
                 val latch = CountDownLatch(1)
                 var fcmTokenResult: String? = null
-                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                    if (task.isSuccessful) fcmTokenResult = task.result
+                SafeFirebase.getFcmToken(context) { token ->
+                    fcmTokenResult = token
                     latch.countDown()
                 }
                 if (latch.await(5, TimeUnit.SECONDS) && fcmTokenResult != null) {

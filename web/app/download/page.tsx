@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
 const SELFHOSTED_APK_PATH = '/textbee-selfhosted.apk'
-const SELFHOSTED_APK_SIZE_BYTES = 20_341_311
+const SELFHOSTED_APK_SIZE_BYTES = 20_340_710
 const SELFHOSTED_VERSION = '2.8.0'
 
 export default function DownloadPage() {

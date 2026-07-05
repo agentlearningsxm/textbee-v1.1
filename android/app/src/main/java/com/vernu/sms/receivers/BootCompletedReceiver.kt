@@ -5,13 +5,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.google.firebase.messaging.FirebaseMessaging
 import com.vernu.sms.ApiManager
 import com.vernu.sms.AppConstants
 import com.vernu.sms.BuildConfig
 import com.vernu.sms.TextBeeUtils
 import com.vernu.sms.dtos.RegisterDeviceInputDTO
 import com.vernu.sms.dtos.RegisterDeviceResponseDTO
+import com.vernu.sms.firebase.SafeFirebase
 import com.vernu.sms.helpers.HeartbeatManager
 import com.vernu.sms.helpers.SharedPreferenceHelper
 import retrofit2.Call
@@ -55,14 +55,9 @@ class BootCompletedReceiver : BroadcastReceiver() {
     }
 
     private fun updateDeviceInfo(context: Context, deviceId: String, apiKey: String) {
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) {
-                Log.e(TAG, "Failed to obtain FCM token after boot")
-                return@addOnCompleteListener
-            }
-
+        SafeFirebase.getFcmToken(context) { token ->
             val input = RegisterDeviceInputDTO().apply {
-                fcmToken = task.result
+                fcmToken = token
                 appVersionCode = BuildConfig.VERSION_CODE
                 appVersionName = BuildConfig.VERSION_NAME
             }
