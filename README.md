@@ -12,7 +12,7 @@ This is a **self-hosted, fully independent** fork of the TextBee SMS gateway. Al
 | Service | URL | Platform |
 |---------|-----|----------|
 | Web Dashboard | `https://YOUR_WEB_URL` | Vercel or VPS |
-| API Backend | `https://YOUR_API_URL` | Render or VPS |
+| API Backend | `https://YOUR_API_URL` | Hostinger VPS (Coolify) |
 | Database | MongoDB Atlas (reynubixsms) | MongoDB Atlas |
 | Push Notifications | Firebase (textbee-sms-5f04b) | Firebase |
 
@@ -203,7 +203,7 @@ Please feel free to [create an issue](https://github.com/agentlearningsxm/textbe
 This self-hosted instance is **100% independent** from the original TextBee developer:
 
 - ✅ Your own GitHub repository
-- ✅ Your own Render backend
+- ✅ Your own VPS backend (Coolify)
 - ✅ Your own Vercel frontend
 - ✅ Your own MongoDB database
 - ✅ Your own Firebase project
