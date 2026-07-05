@@ -37,6 +37,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vernu.sms.R
+import com.vernu.sms.WebUrls
 import com.vernu.sms.dtos.SimInfoDTO
 import com.vernu.sms.dtos.SubscriptionResponse
 import com.vernu.sms.dtos.UserProfile
@@ -467,7 +468,7 @@ private fun SubscriptionCard(
                             OutlinedButton(
                                 onClick = {
                                     context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://textbee.dev/pricing"))
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(WebUrls.pricing()))
                                     )
                                 }
                             ) {
@@ -477,7 +478,7 @@ private fun SubscriptionCard(
                             TextButton(
                                 onClick = {
                                     context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://app.textbee.dev/dashboard/account"))
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(WebUrls.dashboardAccount()))
                                     )
                                 }
                             ) {
@@ -580,7 +581,7 @@ private fun QuickActionsSection() {
             OutlinedButton(
                 onClick = {
                     context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://app.textbee.dev/dashboard"))
+                        Intent(Intent.ACTION_VIEW, Uri.parse(WebUrls.dashboard()))
                     )
                 },
                 modifier = Modifier.weight(1f)
@@ -592,7 +593,7 @@ private fun QuickActionsSection() {
             OutlinedButton(
                 onClick = {
                     context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://textbee.dev/docs"))
+                        Intent(Intent.ACTION_VIEW, Uri.parse(WebUrls.docs()))
                     )
                 },
                 modifier = Modifier.weight(1f)
