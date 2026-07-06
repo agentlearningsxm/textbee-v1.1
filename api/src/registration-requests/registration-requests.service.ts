@@ -162,13 +162,14 @@ export class RegistrationRequestsService {
       return request
     }
 
-    // Create the user account (mark as email-verified since admin approved)
+    // Create the user account (mark as email-verified + approved since admin approved)
     await this.usersService.create({
       name: request.name,
       email: request.email,
       password: request.password,
       phone: request.phone,
       emailVerifiedAt: new Date(),
+      isApproved: true,
     })
 
     // Update the request status

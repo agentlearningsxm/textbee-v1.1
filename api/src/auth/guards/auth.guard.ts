@@ -9,6 +9,7 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import { UsersService } from '../../users/users.service'
 import { AuthService } from '../auth.service'
+import { UserRole } from '../../users/user-roles.enum'
 import * as bcrypt from 'bcryptjs'
 
 @Injectable()
@@ -62,6 +63,21 @@ export class AuthGuard implements CanActivate {
     if (userId) {
       const user = await this.usersService.findOne({ _id: userId })
       if (user) {
+        // Re-check account state on every request, not just at login. Otherwise a
+        // banned or de-approved user keeps full access until their (up to 60-day)
+        // JWT expires. Admins are always exempt from the approval gate.
+        if (user.isBanned) {
+          throw new HttpException(
+            { error: 'Your account has been suspended. Please contact support for assistance.' },
+            HttpStatus.FORBIDDEN,
+          )
+        }
+        if (user.role !== UserRole.ADMIN && !user.isApproved) {
+          throw new HttpException(
+            { error: 'Your account is awaiting administrator approval.' },
+            HttpStatus.FORBIDDEN,
+          )
+        }
         request.user = user
         this.authService.trackAccessLog({ request })
         return true

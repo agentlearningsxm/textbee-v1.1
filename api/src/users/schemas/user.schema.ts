@@ -39,6 +39,12 @@ export class User
   @Prop({ type: Boolean, default: false })
   isBanned: boolean
 
+  // Admin-gated access: an account may sign in only once this is true.
+  // Set by admin-create, admin-approval of a request, a valid invite, or the seeded owner.
+  // Existing accounts are grandfathered to true on boot (see SeedService).
+  @Prop({ type: Boolean, default: false })
+  isApproved: boolean
+
   @Prop({ type: Date })
   accountDeletionRequestedAt: Date
 

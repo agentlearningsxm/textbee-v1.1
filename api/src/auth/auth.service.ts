@@ -7,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import { ApiKey, ApiKeyDocument } from './schemas/api-key.schema'
 import { Model } from 'mongoose'
 import { User, UserDocument } from '../users/schemas/user.schema'
+import { UserRole } from '../users/user-roles.enum'
 import axios from 'axios'
 import {
   PasswordReset,
@@ -64,6 +65,8 @@ export class AuthService {
       )
     }
 
+    this.assertApproved(user)
+
     user.lastLoginAt = new Date()
     await user.save()
 
@@ -74,28 +77,41 @@ export class AuthService {
     }
   }
 
+  /**
+   * Admin-gated access: only accounts an admin created/approved/invited (isApproved),
+   * or admins themselves, may sign in. Applies to every login path.
+   */
+  private assertApproved(user: UserDocument) {
+    if (user.role === UserRole.ADMIN || user.isApproved) {
+      return
+    }
+    throw new HttpException(
+      {
+        error:
+          'Your account is awaiting administrator approval. You will be able to sign in once access is granted.',
+      },
+      HttpStatus.FORBIDDEN,
+    )
+  }
+
   async loginWithGoogle(idToken: string) {
     const response = await axios.get(
       `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`,
     )
 
     const { sub: googleId, name, email, picture } = response.data
-    let user = await this.usersService.findOne({ email })
+    const user = await this.usersService.findOne({ email })
 
+    // Admin-gated: Google sign-in may NOT self-create an account. Access is granted
+    // only through admin creation / approval / invite. Unknown Google users are refused.
     if (!user) {
-      user = await this.usersService.create({
-        name,
-        email,
-      })
-      setImmediate(() => {
-        this.mailService.sendEmailFromTemplate({
-          to: user.email,
-          subject: 'Welcome to TextBee - Lets get started!',
-          template: 'welcome-1',
-          context: { name: user.name },
-          from: 'vernu vernu@textbee.dev',
-        })
-      })
+      throw new HttpException(
+        {
+          error:
+            'Access to this dashboard is by administrator invitation only. Please contact your administrator to request access.',
+        },
+        HttpStatus.FORBIDDEN,
+      )
     }
 
     if (user.googleId !== googleId) {
@@ -122,6 +138,8 @@ export class AuthService {
       )
     }
 
+    this.assertApproved(user)
+
     user.lastLoginAt = new Date()
     await user.save()
 
@@ -135,32 +153,34 @@ export class AuthService {
   async register(userData: any) {
     await this.turnstileService.verify(userData.turnstileToken)
 
-    // Check if invite code is required
-    const isInviteOnly = this.invitesService.isInviteOnlyMode()
-
-    if (isInviteOnly && !userData.inviteCode) {
+    // Admin-gated access, fail-closed: a valid admin-issued invite code is ALWAYS
+    // required to self-register, independent of REGISTRATION_MODE. Un-invited users
+    // must go through Request Access, which an admin approves. This means a
+    // misconfigured/absent REGISTRATION_MODE can never silently open registration.
+    if (!userData.inviteCode) {
       throw new HttpException(
-        { error: 'An invite code is required to register' },
-        HttpStatus.BAD_REQUEST,
+        {
+          error:
+            'An invite code is required to register. If you do not have one, please use the Request Access form.',
+        },
+        HttpStatus.FORBIDDEN,
+      )
+    }
+
+    // In approval-required mode, even an invite must go through admin approval.
+    if (this.invitesService.isApprovalRequiredMode()) {
+      throw new HttpException(
+        { error: 'Registration requires admin approval. Please use the Request Access form instead.' },
+        HttpStatus.FORBIDDEN,
       )
     }
 
     // Validate invite code (without consuming yet)
-    if (userData.inviteCode) {
-      const isValidInvite = await this.invitesService.validateInviteCode(userData.inviteCode)
-      if (!isValidInvite) {
-        throw new HttpException(
-          { error: 'Invalid or expired invite code' },
-          HttpStatus.BAD_REQUEST,
-        )
-      }
-    }
-
-    const isApprovalRequired = this.invitesService.isApprovalRequiredMode()
-    if (isApprovalRequired) {
+    const isValidInvite = await this.invitesService.validateInviteCode(userData.inviteCode)
+    if (!isValidInvite) {
       throw new HttpException(
-        { error: 'Registration requires admin approval. Please use the Request Access form instead.' },
-        HttpStatus.FORBIDDEN,
+        { error: 'Invalid or expired invite code' },
+        HttpStatus.BAD_REQUEST,
       )
     }
 
@@ -178,29 +198,23 @@ export class AuthService {
     this.validatePassword(userData.password)
 
     const hashedPassword = await bcrypt.hash(userData.password, 10)
-    const { turnstileToken, inviteCode, ...sanitizedUserData } = userData
+    // Pass only explicit, trusted fields — never spread the request body, so role /
+    // isApproved / isBanned can't be mass-assigned to escalate access.
     const user = await this.usersService.create({
-      ...sanitizedUserData,
+      name: userData.name,
+      email: userData.email,
+      phone: userData.phone,
       password: hashedPassword,
     })
 
-    // Consume the invite code after successful user creation
-    if (inviteCode) {
-      await this.invitesService.validateAndConsumeInvite(inviteCode, user._id)
-      // Invite-registered users are verified by proxy — skip email verification
-      user.emailVerifiedAt = new Date()
-    }
+    // Consume the invite code after successful user creation. A valid admin-issued
+    // invite is admin authorization, so the account is approved + verified by proxy.
+    await this.invitesService.validateAndConsumeInvite(userData.inviteCode, user._id)
+    user.emailVerifiedAt = new Date()
+    user.isApproved = true
 
     user.lastLoginAt = new Date()
     await user.save()
-
-    // Only send email verification for self-registered users (no invite code)
-    if (!inviteCode) {
-      this.sendEmailVerificationEmail(user).catch((e) => {
-        console.log('Failed to send email verification email')
-        console.log(e)
-      })
-    }
 
     setImmediate(() => {
       this.mailService.sendEmailFromTemplate({

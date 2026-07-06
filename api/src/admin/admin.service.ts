@@ -152,6 +152,7 @@ export class AdminService {
       password: hashedPassword,
       phone: data.phone,
       emailVerifiedAt: new Date(),
+      isApproved: true, // admin-created accounts may sign in immediately
     })
     await user.save()
 

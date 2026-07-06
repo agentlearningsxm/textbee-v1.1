@@ -28,12 +28,16 @@ export class UsersService {
     password,
     phone,
     emailVerifiedAt,
+    isApproved,
   }: {
     name: string
     email: string
     password?: string
     phone?: string
     emailVerifiedAt?: Date
+    // Explicit, trusted-caller-only flag. Never derived from a request body spread,
+    // so it cannot be mass-assigned to escalate access.
+    isApproved?: boolean
   }) {
     if (await this.findOne({ email })) {
       throw new HttpException(
@@ -50,6 +54,7 @@ export class UsersService {
       password,
       phone,
       emailVerifiedAt: emailVerifiedAt || null,
+      isApproved: isApproved === true,
     })
     return await newUser.save()
   }

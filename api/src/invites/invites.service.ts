@@ -149,6 +149,28 @@ export class InvitesService {
     code: string,
     userId: Types.ObjectId,
   ): Promise<boolean> {
+    const now = new Date()
+
+    // Atomic consume: increment currentUses only if the invite is still valid AND
+    // has a use remaining, in a single DB operation. This closes a check-then-write
+    // race where two concurrent registrations on the same single-use code could both
+    // pass an in-memory `currentUses < maxUses` check and each mint an approved account.
+    const consumed = await this.inviteModel.findOneAndUpdate(
+      {
+        code: code.toUpperCase(),
+        isRevoked: { $ne: true },
+        expiresAt: { $gt: now },
+        $expr: { $lt: ['$currentUses', '$maxUses'] },
+      },
+      { $inc: { currentUses: 1 }, $set: { usedBy: userId } },
+      { new: true },
+    )
+
+    if (consumed) {
+      return true
+    }
+
+    // The atomic update matched nothing — re-read to return a precise reason.
     const invite = await this.inviteModel.findOne({ code: code.toUpperCase() })
 
     if (!invite) {
@@ -165,26 +187,17 @@ export class InvitesService {
       )
     }
 
-    if (invite.expiresAt < new Date()) {
+    if (invite.expiresAt < now) {
       throw new HttpException(
         { error: 'This invite code has expired' },
         HttpStatus.BAD_REQUEST,
       )
     }
 
-    if (invite.currentUses >= invite.maxUses) {
-      throw new HttpException(
-        { error: 'This invite code has reached its maximum uses' },
-        HttpStatus.BAD_REQUEST,
-      )
-    }
-
-    // Consume the invite
-    invite.currentUses += 1
-    invite.usedBy = userId
-    await invite.save()
-
-    return true
+    throw new HttpException(
+      { error: 'This invite code has reached its maximum uses' },
+      HttpStatus.BAD_REQUEST,
+    )
   }
 
   /**
