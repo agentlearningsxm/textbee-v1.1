@@ -17,8 +17,6 @@ export default function Logout() {
   }, [router, session.status])
 
   return (
-    <div className='text-center min-h-screen flex items-center justify-center'>
-      Logging out...
-    </div>
+    <div className='text-center text-[#E8E4DC]'>Logging out...</div>
   )
 }

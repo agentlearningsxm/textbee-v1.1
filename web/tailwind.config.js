@@ -71,6 +71,10 @@ module.exports = {
           950: '#2C0D02',
         },
       },
+      fontFamily: {
+        cinzel: ['var(--font-cinzel)', 'serif'],
+        cormorant: ['var(--font-cormorant)', 'serif'],
+      },
       keyframes: {
         'accordion-down': {
           from: {

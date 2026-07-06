@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { KeyRound } from 'lucide-react'
 
 import LoginWithGoogle from '../(components)/login-with-google'
 import RegisterForm from '../(components)/register-form'
@@ -20,58 +21,71 @@ export default function RegisterPage() {
   const redirect = searchParams.get('redirect')
 
   return (
-    <div className='flex items-center justify-center min-h-screen bg-gray-100 dark:bg-muted'>
-      <Card className='w-[450px] shadow-lg'>
-        <CardHeader className='space-y-1'>
-          <CardTitle className='text-2xl font-bold text-center'>
-            Create an account
-          </CardTitle>
-          <CardDescription className='text-center'>
-            Enter your details to get started
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RegisterForm />
-          <div className='relative mt-4'>
-            <div className='absolute inset-0 flex items-center'>
-              <span className='w-full border-t' />
-            </div>
-            <div className='relative flex justify-center text-xs uppercase'>
-              <span className='bg-background dark:bg-muted px-2 text-muted-foreground'>
-                Or
-              </span>
-            </div>
-          </div>
-          <div className='mt-4 flex justify-center'>
-            <LoginWithGoogle />
-          </div>
-        </CardContent>
-        <CardFooter className='flex flex-col space-y-2 text-center'>
-          <p className='text-sm text-gray-600'>
-            Don't have an invite code?{' '}
+    <Card className='w-full max-w-[450px] border border-[rgba(201,169,110,0.25)] bg-[#14141A]/95 text-[#E8E4DC] shadow-2xl shadow-black/50 backdrop-blur-sm'>
+      <CardHeader className='space-y-1'>
+        <CardTitle
+          className='font-cinzel text-2xl font-semibold text-center tracking-wide text-[#E8E4DC]'
+          style={{ letterSpacing: '0.02em' }}
+        >
+          Create an account
+        </CardTitle>
+        <CardDescription className='text-center text-[#A09890]'>
+          Enter your details to get started
+        </CardDescription>
+        <div className='!mt-4 flex items-start gap-2 rounded-md border border-[rgba(201,169,110,0.25)] bg-[#C9A96E]/[0.06] px-3 py-2.5 text-left'>
+          <KeyRound className='mt-0.5 h-4 w-4 shrink-0 text-[#C9A96E]' />
+          <p className='text-xs leading-relaxed text-[#A09890]'>
+            Access by invitation. Registration requires a valid invite code.
+            Don&apos;t have one?{' '}
             <Link
               href='/request-access'
-              className='font-medium text-brand-600 hover:underline'
+              className='font-medium text-[#7BA7E8] hover:text-[#9CC3EE] hover:underline'
             >
               Request access
             </Link>
+            .
           </p>
-          <p className='text-sm text-gray-600'>
-            Already have an account?{' '}
-            <Link
-              href={{
-                pathname: Routes.login,
-                query: {
-                  redirect: redirect ? decodeURIComponent(redirect) : undefined,
-                },
-              }}
-              className='font-medium text-brand-600 hover:underline'
-            >
-              Sign in
-            </Link>
-          </p>
-        </CardFooter>
-      </Card>
-    </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <RegisterForm />
+        <div className='relative mt-4'>
+          <div className='absolute inset-0 flex items-center'>
+            <span className='w-full border-t border-[rgba(201,169,110,0.25)]' />
+          </div>
+          <div className='relative flex justify-center text-xs uppercase'>
+            <span className='bg-[#14141A] px-2 text-[#A09890]'>Or</span>
+          </div>
+        </div>
+        <div className='mt-4 flex justify-center'>
+          <LoginWithGoogle />
+        </div>
+      </CardContent>
+      <CardFooter className='flex flex-col space-y-2 text-center'>
+        <p className='text-sm text-[#A09890]'>
+          Don't have an invite code?{' '}
+          <Link
+            href='/request-access'
+            className='font-medium text-[#7BA7E8] hover:text-[#9CC3EE] hover:underline'
+          >
+            Request access
+          </Link>
+        </p>
+        <p className='text-sm text-[#A09890]'>
+          Already have an account?{' '}
+          <Link
+            href={{
+              pathname: Routes.login,
+              query: {
+                redirect: redirect ? decodeURIComponent(redirect) : undefined,
+              },
+            }}
+            className='font-medium text-[#7BA7E8] hover:text-[#9CC3EE] hover:underline'
+          >
+            Sign in
+          </Link>
+        </p>
+      </CardFooter>
+    </Card>
   )
 }

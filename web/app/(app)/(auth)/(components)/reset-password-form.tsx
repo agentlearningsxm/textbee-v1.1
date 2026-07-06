@@ -80,120 +80,142 @@ export default function ResetPasswordForm({
     }
   }
 
+  const inputClass =
+    'bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]'
+
   return (
-    <div className='flex items-center justify-center min-h-screen bg-gray-100 dark:bg-muted'>
-      <Card className='w-[400px] shadow-lg'>
-        <CardHeader className='space-y-1'>
-          <CardTitle className='text-2xl font-bold text-center'>
-            Reset your password
-          </CardTitle>
-          <CardDescription className='text-center'>
-            Enter your new password below
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form
-              onSubmit={form.handleSubmit(onResetPassword)}
-              className='space-y-4'
-            >
-              <FormField
-                control={form.control}
-                name='email'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input placeholder='m@example.com' {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name='otp'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>OTP</FormLabel>
-                    <FormControl>
-                      <Input placeholder='1234' {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='newPassword'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>New Password</FormLabel>
-                    <FormControl>
-                      <Input type='password' {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='confirmPassword'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Confirm Password</FormLabel>
-                    <FormControl>
-                      <Input type='password' {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {form.formState.errors.root && (
-                <p className='text-sm font-medium text-red-500'>
-                  {form.formState.errors.root.message}
-                </p>
-              )}
-
-              <Button
-                className='w-full'
-                type='submit'
-                disabled={form.formState.isSubmitting}
-              >
-                {form.formState.isSubmitting ? (
-                  <>
-                    {/* <Icons.spinner className="mr-2 h-4 w-4 animate-spin" /> */}
-                    Resetting password...
-                  </>
-                ) : (
-                  'Reset password'
-                )}
-              </Button>
-            </form>
-          </Form>
-          {form.formState.isSubmitted && form.formState.isSubmitSuccessful && (
-            <Alert className='mt-4' variant='default'>
-              {/* <Icons.checkCircle className="h-4 w-4" /> */}
-              <AlertTitle>Password reset successful</AlertTitle>
-              <AlertDescription>
-                Your password has been reset successfully. You can now login
-                with your new password.
-              </AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-        <CardFooter className='text-center'>
-          <Link
-            href={Routes.login}
-            className='text-sm text-brand-600 hover:underline'
+    <Card className='w-full max-w-[400px] border border-[rgba(201,169,110,0.25)] bg-[#14141A]/95 text-[#E8E4DC] shadow-2xl shadow-black/50 backdrop-blur-sm'>
+      <CardHeader className='space-y-1'>
+        <CardTitle
+          className='font-cinzel text-2xl font-semibold text-center tracking-wide text-[#E8E4DC]'
+          style={{ letterSpacing: '0.02em' }}
+        >
+          Reset your password
+        </CardTitle>
+        <CardDescription className='text-center text-[#A09890]'>
+          Enter your new password below
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onResetPassword)}
+            className='space-y-4'
           >
-            Back to login
-          </Link>
-        </CardFooter>
-      </Card>
-    </div>
+            <FormField
+              control={form.control}
+              name='email'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder='m@example.com'
+                      {...field}
+                      className={inputClass}
+                    />
+                  </FormControl>
+                  <FormMessage className='text-red-400' />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='otp'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>OTP</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder='1234'
+                      {...field}
+                      className={inputClass}
+                    />
+                  </FormControl>
+                  <FormMessage className='text-red-400' />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='newPassword'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>New Password</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='password'
+                      {...field}
+                      className={inputClass}
+                    />
+                  </FormControl>
+                  <FormMessage className='text-red-400' />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='confirmPassword'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Confirm Password</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='password'
+                      {...field}
+                      className={inputClass}
+                    />
+                  </FormControl>
+                  <FormMessage className='text-red-400' />
+                </FormItem>
+              )}
+            />
+
+            {form.formState.errors.root && (
+              <p className='text-sm font-medium text-red-500'>
+                {form.formState.errors.root.message}
+              </p>
+            )}
+
+            <Button
+              className='w-full bg-[#C9A96E] font-cinzel font-semibold tracking-wide text-[#0D0D0D] hover:bg-[#E8B923]'
+              type='submit'
+              disabled={form.formState.isSubmitting}
+            >
+              {form.formState.isSubmitting ? (
+                <>
+                  {/* <Icons.spinner className="mr-2 h-4 w-4 animate-spin" /> */}
+                  Resetting password...
+                </>
+              ) : (
+                'Reset password'
+              )}
+            </Button>
+          </form>
+        </Form>
+        {form.formState.isSubmitted && form.formState.isSubmitSuccessful && (
+          <Alert className='mt-4 border-green-700/40 bg-green-900/20 text-green-200'>
+            {/* <Icons.checkCircle className="h-4 w-4" /> */}
+            <AlertTitle className='text-green-200'>
+              Password reset successful
+            </AlertTitle>
+            <AlertDescription className='text-green-200'>
+              Your password has been reset successfully. You can now login
+              with your new password.
+            </AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+      <CardFooter className='text-center'>
+        <Link
+          href={Routes.login}
+          className='text-sm text-[#7BA7E8] hover:text-[#9CC3EE] hover:underline'
+        >
+          Back to login
+        </Link>
+      </CardFooter>
+    </Card>
   )
 }

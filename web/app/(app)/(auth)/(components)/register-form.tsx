@@ -157,8 +157,8 @@ export default function RegisterForm() {
       <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
         {/* Show invite-only notice */}
         {isInviteOnly && (
-          <Alert className='border-amber-500/50 bg-amber-500/10'>
-            <AlertDescription className='text-amber-700 dark:text-amber-400'>
+          <Alert className='border-amber-500/40 bg-amber-500/10'>
+            <AlertDescription className='text-amber-400'>
               Registration is currently invite-only. Please enter your invite code below.
             </AlertDescription>
           </Alert>
@@ -178,15 +178,15 @@ export default function RegisterForm() {
                   <Input
                     placeholder='Enter your invite code'
                     {...field}
-                    className='dark:text-white dark:bg-gray-800 font-mono uppercase tracking-wider'
+                    className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f] font-mono uppercase tracking-wider'
                   />
                 </FormControl>
-                <FormDescription>
+                <FormDescription className='text-[#A09890]'>
                   {inviteCodeFromUrl
                     ? 'Your invite code has been pre-filled'
                     : 'Enter the invite code you received'}
                 </FormDescription>
-                <FormMessage />
+                <FormMessage className='text-red-400' />
               </FormItem>
             )}
           />
@@ -199,9 +199,9 @@ export default function RegisterForm() {
             <FormItem>
               <FormLabel>Full Name</FormLabel>
               <FormControl>
-                <Input placeholder='John Doe' {...field} className='dark:text-white dark:bg-gray-800' />
+                <Input placeholder='John Doe' {...field} className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]' />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -212,9 +212,9 @@ export default function RegisterForm() {
             <FormItem>
               <FormLabel>Email</FormLabel>
               <FormControl>
-                <Input placeholder='m@example.com' {...field} className='dark:text-white dark:bg-gray-800' />
+                <Input placeholder='m@example.com' {...field} className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]' />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -225,9 +225,9 @@ export default function RegisterForm() {
             <FormItem>
               <FormLabel>Password</FormLabel>
               <FormControl>
-                <Input type='password' {...field} className='dark:text-white dark:bg-gray-800' />
+                <Input type='password' {...field} className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]' />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -238,9 +238,9 @@ export default function RegisterForm() {
             <FormItem>
               <FormLabel>Phone (optional)</FormLabel>
               <FormControl>
-                <Input placeholder='+1 (555) 000-0000' {...field} className='dark:text-white dark:bg-gray-800' />
+                <Input placeholder='+1 (555) 000-0000' {...field} className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]' />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -257,10 +257,10 @@ export default function RegisterForm() {
                   <Input
                     placeholder='Have an invite code?'
                     {...field}
-                    className='dark:text-white dark:bg-gray-800 font-mono uppercase tracking-wider'
+                    className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f] font-mono uppercase tracking-wider'
                   />
                 </FormControl>
-                <FormMessage />
+                <FormMessage className='text-red-400' />
               </FormItem>
             )}
           />
@@ -277,7 +277,7 @@ export default function RegisterForm() {
                   className='min-h-[65px] w-full flex justify-center'
                 />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -303,12 +303,12 @@ export default function RegisterForm() {
                   I want to receive updates about new features and promotions
                 </FormLabel>
               </div>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
         <Button
-          className='w-full'
+          className='w-full bg-[#C9A96E] font-cinzel font-semibold tracking-wide text-[#0D0D0D] hover:bg-[#E8B923]'
           type='submit'
           disabled={form.formState.isSubmitting}
         >

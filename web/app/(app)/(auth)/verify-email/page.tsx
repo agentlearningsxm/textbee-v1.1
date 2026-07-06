@@ -23,38 +23,47 @@ import { Routes } from '@/config/routes'
 const ErrorAlert = ({ message }: { message: string }) => (
   <Alert
     variant='destructive'
-    className='bg-red-50 text-red-700 border-red-200'
+    className='bg-red-950/40 text-red-300 border-red-800/50'
   >
-    <XCircle className='h-5 w-5 text-red-600' />
-    <AlertTitle className='text-lg font-semibold'>Error</AlertTitle>
-    <AlertDescription>{message}</AlertDescription>
+    <XCircle className='h-5 w-5 text-red-400' />
+    <AlertTitle className='text-lg font-semibold text-red-300'>
+      Error
+    </AlertTitle>
+    <AlertDescription className='text-red-300'>{message}</AlertDescription>
   </Alert>
 )
 
 const SuccessAlert = ({ title, message }: { title: string; message: string }) => (
-  <Alert className='bg-green-50 text-green-700 border-green-200'>
-    <CheckCircle className='h-5 w-5 text-green-600' />
-    <AlertTitle className='text-lg font-semibold'>{title}</AlertTitle>
-    <AlertDescription>{message}</AlertDescription>
+  <Alert className='bg-green-950/40 text-green-300 border-green-800/50'>
+    <CheckCircle className='h-5 w-5 text-green-400' />
+    <AlertTitle className='text-lg font-semibold text-green-300'>
+      {title}
+    </AlertTitle>
+    <AlertDescription className='text-green-300'>{message}</AlertDescription>
   </Alert>
 )
 
 const InfoAlert = ({ title, message }: { title: string; message: string }) => (
-  <Alert className='bg-brand-50 text-brand-700 border-brand-200'>
-    <Mail className='h-5 w-5 text-brand-600' />
-    <AlertTitle className='text-lg font-semibold'>{title}</AlertTitle>
-    <AlertDescription>{message}</AlertDescription>
+  <Alert className='bg-[#C9A96E]/10 text-[#C9A96E] border-[rgba(201,169,110,0.3)]'>
+    <Mail className='h-5 w-5 text-[#C9A96E]' />
+    <AlertTitle className='text-lg font-semibold text-[#C9A96E]'>
+      {title}
+    </AlertTitle>
+    <AlertDescription className='text-[#E8E4DC]'>{message}</AlertDescription>
   </Alert>
 )
 
 const LoadingSpinner = () => (
   <div className='flex justify-center py-6'>
-    <Loader2 className='h-10 w-10 animate-spin text-primary' />
+    <Loader2 className='h-10 w-10 animate-spin text-[#C9A96E]' />
   </div>
 )
 
 const DashboardButton = () => (
-  <Button className='w-full py-5 mt-2 text-white' asChild>
+  <Button
+    className='w-full py-5 mt-2 bg-[#C9A96E] font-cinzel font-semibold tracking-wide text-[#0D0D0D] hover:bg-[#E8B923]'
+    asChild
+  >
     <Link href={Routes.dashboard}>
       Go to Dashboard
       <ArrowRight className='ml-2 h-5 w-5' />
@@ -63,7 +72,10 @@ const DashboardButton = () => (
 )
 
 const LoginButton = () => (
-  <Button className='w-full py-5 mt-2' asChild>
+  <Button
+    className='w-full py-5 mt-2 bg-[#C9A96E] font-cinzel font-semibold tracking-wide text-[#0D0D0D] hover:bg-[#E8B923]'
+    asChild
+  >
     <Link href='/login'>
       Go to Login
       <ArrowRight className='ml-2 h-5 w-5' />
@@ -154,8 +166,15 @@ export default function VerifyEmailPage() {
       return (
         <>
           <CardHeader>
-            <CardTitle className='text-2xl font-bold'>Email Verification</CardTitle>
-            <CardDescription>Checking verification status...</CardDescription>
+            <CardTitle
+              className='font-cinzel text-2xl font-semibold tracking-wide text-[#E8E4DC]'
+              style={{ letterSpacing: '0.02em' }}
+            >
+              Email Verification
+            </CardTitle>
+            <CardDescription className='text-[#A09890]'>
+              Checking verification status...
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <LoadingSpinner />
@@ -169,8 +188,13 @@ export default function VerifyEmailPage() {
       return (
         <>
           <CardHeader>
-            <CardTitle className='text-2xl font-bold'>Email Verification</CardTitle>
-            <CardDescription>
+            <CardTitle
+              className='font-cinzel text-2xl font-semibold tracking-wide text-[#E8E4DC]'
+              style={{ letterSpacing: '0.02em' }}
+            >
+              Email Verification
+            </CardTitle>
+            <CardDescription className='text-[#A09890]'>
               {isVerifying ? 'Verifying your email address...' : 'Email Verification Status'}
             </CardDescription>
           </CardHeader>
@@ -195,8 +219,13 @@ export default function VerifyEmailPage() {
       return (
         <>
           <CardHeader>
-            <CardTitle className='text-2xl font-bold'>Check Your Email</CardTitle>
-            <CardDescription>
+            <CardTitle
+              className='font-cinzel text-2xl font-semibold tracking-wide text-[#E8E4DC]'
+              style={{ letterSpacing: '0.02em' }}
+            >
+              Check Your Email
+            </CardTitle>
+            <CardDescription className='text-[#A09890]'>
               We've sent you a verification email. Please check your inbox and click
               the link to verify your account.
             </CardDescription>
@@ -220,7 +249,7 @@ export default function VerifyEmailPage() {
               <DashboardButton />
             ) : (
               <div className='flex items-center gap-2 justify-center w-full'>
-                <span className='text-sm text-gray-600'>
+                <span className='text-sm text-[#A09890]'>
                   Didn't receive the email?
                 </span>
                 <Button
@@ -249,9 +278,14 @@ export default function VerifyEmailPage() {
     return (
       <>
         <CardHeader>
-          <CardTitle className='text-2xl font-bold'>Email Verification</CardTitle>
-          <CardDescription>
-            {isLoggedIn 
+          <CardTitle
+            className='font-cinzel text-2xl font-semibold tracking-wide text-[#E8E4DC]'
+            style={{ letterSpacing: '0.02em' }}
+          >
+            Email Verification
+          </CardTitle>
+          <CardDescription className='text-[#A09890]'>
+            {isLoggedIn
               ? isEmailVerified
                 ? 'Your email is already verified'
                 : 'Verify your email address to access all features'
@@ -275,11 +309,13 @@ export default function VerifyEmailPage() {
           {!isLoggedIn && (
             <Alert
               variant='destructive'
-              className='bg-red-50 text-red-700 border-red-200'
+              className='bg-red-950/40 text-red-300 border-red-800/50'
             >
-              <XCircle className='h-5 w-5 text-red-600' />
-              <AlertTitle className='text-lg font-semibold'>Not Logged In</AlertTitle>
-              <AlertDescription>
+              <XCircle className='h-5 w-5 text-red-400' />
+              <AlertTitle className='text-lg font-semibold text-red-300'>
+                Not Logged In
+              </AlertTitle>
+              <AlertDescription className='text-red-300'>
                 You need to be logged in to verify your email
               </AlertDescription>
             </Alert>
@@ -291,7 +327,7 @@ export default function VerifyEmailPage() {
               <DashboardButton />
             ) : (
               <Button
-                className='w-full py-5'
+                className='w-full py-5 bg-[#C9A96E] font-cinzel font-semibold tracking-wide text-[#0D0D0D] hover:bg-[#E8B923]'
                 onClick={() => sendVerificationEmail()}
                 disabled={isSending}
               >
@@ -312,10 +348,8 @@ export default function VerifyEmailPage() {
   }
 
   return (
-    <div className='flex min-h-screen items-center justify-center bg-gray-100 dark:bg-gray-900 p-4'>
-      <Card className='w-full max-w-md shadow-lg border-gray-200 dark:border-gray-800'>
-        {renderContent()}
-      </Card>
-    </div>
+    <Card className='w-full max-w-md border border-[rgba(201,169,110,0.25)] bg-[#14141A]/95 text-[#E8E4DC] shadow-2xl shadow-black/50 backdrop-blur-sm'>
+      {renderContent()}
+    </Card>
   )
 }

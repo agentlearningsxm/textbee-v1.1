@@ -122,10 +122,10 @@ export default function LoginForm() {
                 <Input
                   placeholder='m@example.com'
                   {...field}
-                  className='dark:text-white dark:bg-gray-800'
+                  className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]'
                 />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -139,10 +139,10 @@ export default function LoginForm() {
                 <Input
                   type='password'
                   {...field}
-                  className='dark:text-white dark:bg-gray-800'
+                  className='bg-[#0D0D0D]/40 border-[rgba(201,169,110,0.3)] text-[#E8E4DC] placeholder:text-[#6f685f]'
                 />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -157,7 +157,7 @@ export default function LoginForm() {
                   className='min-h-[65px] w-full flex justify-center'
                 />
               </FormControl>
-              <FormMessage />
+              <FormMessage className='text-red-400' />
             </FormItem>
           )}
         />
@@ -167,7 +167,7 @@ export default function LoginForm() {
           </p>
         )}
         <Button
-          className='w-full'
+          className='w-full bg-[#C9A96E] font-cinzel font-semibold tracking-wide text-[#0D0D0D] hover:bg-[#E8B923]'
           type='submit'
           disabled={form.formState.isSubmitting}
         >

@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { Cinzel } from 'next/font/google'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -19,6 +20,8 @@ import { signOut } from 'next-auth/react'
 import { Routes } from '@/config/routes'
 import ThemeToggle from './theme-toggle'
 import { Session } from 'next-auth'
+
+const cinzel = Cinzel({ subsets: ['latin'], weight: ['600'], display: 'swap' })
 
 export default function AppHeader({ session }: { session: Session }) {
   const router = useRouter()
@@ -153,17 +156,16 @@ export default function AppHeader({ session }: { session: Session }) {
             href={Routes.landingPage}
           >
             <Image
-              src='/images/logo.png'
-              alt='textbee Logo'
-              width={24}
-              height={24}
-              className='h-6 w-6 bg-white rounded-full'
+              src='/images/reynubix/anubis-mark-96.png'
+              alt='Reynubix'
+              width={32}
+              height={32}
+              className='h-8 w-8 rounded-md'
             />
-            <span className='font-bold'>
-              text<span className='text-primary'>bee</span>
-              <span className='text-xs align-center text-gray-500 dark:text-gray-400'>
-                .dev
-              </span>
+            <span
+              className={`${cinzel.className} font-semibold tracking-wide`}
+            >
+              REYNU<span className='text-[#C9A96E]'>BIX</span>
             </span>
           </Link>
         </div>

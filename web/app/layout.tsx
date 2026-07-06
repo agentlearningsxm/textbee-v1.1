@@ -9,8 +9,8 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 
 export const metadata: Metadata = {
-  title: 'TextBee - Self-hosted SMS Gateway',
-  description: 'Your private SMS gateway dashboard',
+  title: 'Reynubix — Secure SMS Gateway',
+  description: 'Your private SMS gateway dashboard, secured by Reynubix.',
 }
 
 export default async function RootLayout({ children }: PropsWithChildren) {

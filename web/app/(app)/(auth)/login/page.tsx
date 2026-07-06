@@ -21,55 +21,54 @@ export default function LoginPage() {
   const redirect = searchParams.get('redirect')
 
   return (
-    <div className='flex items-center justify-center min-h-screen bg-gray-100 dark:bg-muted'>
-      <Card className='w-[400px] shadow-lg'>
-        <CardHeader className='space-y-1'>
-          <CardTitle className='text-2xl font-bold text-center'>
-            Welcome back
-          </CardTitle>
-          <CardDescription className='text-center'>
-            Enter your credentials to access your account
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LoginForm />
-          <div className='relative mt-4'>
-            <div className='absolute inset-0 flex items-center'>
-              <span className='w-full border-t' />
-            </div>
-            <div className='relative flex justify-center text-xs uppercase'>
-              <span className='bg-background dark:bg-muted px-2 text-muted-foreground'>
-                Or
-              </span>
-            </div>
+    <Card className='w-full max-w-[400px] border border-[rgba(201,169,110,0.25)] bg-[#14141A]/95 text-[#E8E4DC] shadow-2xl shadow-black/50 backdrop-blur-sm'>
+      <CardHeader className='space-y-1'>
+        <CardTitle
+          className='font-cinzel text-2xl font-semibold text-center tracking-wide text-[#E8E4DC]'
+          style={{ letterSpacing: '0.02em' }}
+        >
+          Welcome back
+        </CardTitle>
+        <CardDescription className='text-center text-[#A09890]'>
+          Enter your credentials to access your account
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <LoginForm />
+        <div className='relative mt-4'>
+          <div className='absolute inset-0 flex items-center'>
+            <span className='w-full border-t border-[rgba(201,169,110,0.25)]' />
           </div>
-          <div className='mt-4 flex justify-center'>
-            <LoginWithGoogle />
+          <div className='relative flex justify-center text-xs uppercase'>
+            <span className='bg-[#14141A] px-2 text-[#A09890]'>Or</span>
           </div>
-        </CardContent>
-        <CardFooter className='flex flex-col space-y-2 text-center'>
+        </div>
+        <div className='mt-4 flex justify-center'>
+          <LoginWithGoogle />
+        </div>
+      </CardContent>
+      <CardFooter className='flex flex-col space-y-2 text-center'>
+        <Link
+          href={Routes.resetPassword}
+          className='text-sm text-[#7BA7E8] hover:text-[#9CC3EE] hover:underline'
+        >
+          Forgot your password?
+        </Link>
+        <p className='text-sm text-[#A09890]'>
+          Don&apos;t have an account?{' '}
           <Link
-            href={Routes.resetPassword}
-            className='text-sm text-brand-600 hover:underline'
+            href={{
+              pathname: Routes.register,
+              query: {
+                redirect: redirect ? decodeURIComponent(redirect) : undefined,
+              },
+            }}
+            className='font-medium text-[#7BA7E8] hover:text-[#9CC3EE] hover:underline'
           >
-            Forgot your password?
+            Sign up
           </Link>
-          <p className='text-sm text-gray-600'>
-            Don&apos;t have an account?{' '}
-            <Link
-              href={{
-                pathname: Routes.register,
-                query: {
-                  redirect: redirect ? decodeURIComponent(redirect) : undefined,
-                },
-              }}
-              className='font-medium text-brand-600 hover:underline'
-            >
-              Sign up
-            </Link>
-          </p>
-        </CardFooter>
-      </Card>
-    </div>
+        </p>
+      </CardFooter>
+    </Card>
   )
 }

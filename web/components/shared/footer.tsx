@@ -10,11 +10,11 @@ export default function Footer() {
       <div className='container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row'>
         <div className='flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0'>
           <Image
-            src='/images/logo.png'
-            alt='textbee Logo'
-            width={24}
-            height={24}
-            className='h-6 w-6 bg-white rounded-full'
+            src='/images/reynubix/anubis-mark-96.png'
+            alt='Reynubix'
+            width={28}
+            height={28}
+            className='h-7 w-7 rounded-md'
           />
           <p className='text-center text-sm leading-loose md:text-left'>
             © {new Date().getFullYear()} All rights reserved
