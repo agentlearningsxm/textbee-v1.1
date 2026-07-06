@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/card'
 import { KeyRound } from 'lucide-react'
 
-import LoginWithGoogle from '../(components)/login-with-google'
 import RegisterForm from '../(components)/register-form'
 import { Routes } from '@/config/routes'
 import { useSearchParams } from 'next/navigation'
@@ -49,17 +48,6 @@ export default function RegisterPage() {
       </CardHeader>
       <CardContent>
         <RegisterForm />
-        <div className='relative mt-4'>
-          <div className='absolute inset-0 flex items-center'>
-            <span className='w-full border-t border-[rgba(201,169,110,0.25)]' />
-          </div>
-          <div className='relative flex justify-center text-xs uppercase'>
-            <span className='bg-[#14141A] px-2 text-[#A09890]'>Or</span>
-          </div>
-        </div>
-        <div className='mt-4 flex justify-center'>
-          <LoginWithGoogle />
-        </div>
       </CardContent>
       <CardFooter className='flex flex-col space-y-2 text-center'>
         <p className='text-sm text-[#A09890]'>

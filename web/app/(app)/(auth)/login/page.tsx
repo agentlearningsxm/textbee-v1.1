@@ -12,7 +12,6 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 
-import LoginWithGoogle from '../(components)/login-with-google'
 import LoginForm from '../(components)/login-form'
 import { Routes } from '@/config/routes'
 
@@ -35,17 +34,6 @@ export default function LoginPage() {
       </CardHeader>
       <CardContent>
         <LoginForm />
-        <div className='relative mt-4'>
-          <div className='absolute inset-0 flex items-center'>
-            <span className='w-full border-t border-[rgba(201,169,110,0.25)]' />
-          </div>
-          <div className='relative flex justify-center text-xs uppercase'>
-            <span className='bg-[#14141A] px-2 text-[#A09890]'>Or</span>
-          </div>
-        </div>
-        <div className='mt-4 flex justify-center'>
-          <LoginWithGoogle />
-        </div>
       </CardContent>
       <CardFooter className='flex flex-col space-y-2 text-center'>
         <Link
