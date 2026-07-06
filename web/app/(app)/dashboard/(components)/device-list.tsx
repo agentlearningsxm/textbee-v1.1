@@ -309,7 +309,7 @@ export default function DeviceList() {
               app instead
             </li>
             <li>
-              Open the textbee.dev app and scan the QR code or paste the key manually. Your device should appear in the list when the link succeeds.
+              Open the TextBee app and scan the QR code or paste the key manually. Your device should appear in the list when the link succeeds.
             </li>
           </ol>
           <DialogFooter className='flex-col gap-2 sm:flex-row sm:justify-between'>
