@@ -6,6 +6,7 @@ type Status = 'idle' | 'open' | 'sending' | 'sent' | 'error'
 export default function SupportWidget() {
   const [status, setStatus] = useState<Status>('idle')
   const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
   const [message, setMessage] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
@@ -15,11 +16,12 @@ export default function SupportWidget() {
       const res = await fetch('/api/support', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, message }),
+        body: JSON.stringify({ name, phone, message }),
       })
       if (!res.ok) throw new Error('failed')
       setStatus('sent')
       setName('')
+      setPhone('')
       setMessage('')
     } catch {
       setStatus('error')
@@ -71,7 +73,7 @@ export default function SupportWidget() {
                   </svg>
                 </div>
                 <p className="text-white font-medium">Message sent!</p>
-                <p className="text-zinc-400 text-sm mt-1">We'll text you back shortly.</p>
+                <p className="text-zinc-400 text-sm mt-1">We got your message — you'll receive a confirmation text shortly, and we'll text you back soon.</p>
                 <button onClick={() => setStatus('open')} className="mt-4 text-amber-400 text-sm hover:underline">
                   Send another
                 </button>
@@ -94,6 +96,17 @@ export default function SupportWidget() {
                     onChange={e => setName(e.target.value)}
                     required
                     placeholder="John"
+                    className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Your phone number</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    required
+                    placeholder="+1234567890"
                     className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500"
                   />
                 </div>
