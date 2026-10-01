@@ -7,12 +7,13 @@ import androidx.lifecycle.viewModelScope
 import com.vernu.sms.ApiManagerKt
 import com.vernu.sms.AppConstants
 import com.vernu.sms.BuildConfig
-import com.vernu.sms.TextBeeUtils
+import com.vernu.sms.TextbeeUtils
 import com.vernu.sms.dtos.RegisterDeviceInputDTO
 import com.vernu.sms.dtos.SimInfoCollectionDTO
 import com.vernu.sms.firebase.SafeFirebase
 import com.vernu.sms.helpers.HeartbeatManager
 import com.vernu.sms.helpers.SharedPreferenceHelper
+import com.vernu.sms.helpers.serverErrorMessage
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,7 +94,7 @@ class OnboardingViewModel : ViewModel() {
                 val fcmToken = getFcmToken(context)
                 val collectedSimInfo = SimInfoCollectionDTO().apply {
                     lastUpdated = System.currentTimeMillis()
-                    sims = TextBeeUtils.collectSimInfo(context)
+                    sims = TextbeeUtils.collectSimInfo(context)
                 }
                 val input = RegisterDeviceInputDTO().apply {
                     this.fcmToken = fcmToken
@@ -102,7 +103,10 @@ class OnboardingViewModel : ViewModel() {
                     manufacturer = Build.MANUFACTURER
                     model = Build.MODEL
                     buildId = Build.ID
-                    os = Build.VERSION.BASE_OS
+                    os = "Android"
+                    osVersion = Build.VERSION.RELEASE
+                    osApiLevel = Build.VERSION.SDK_INT
+                    osBuildFingerprint = Build.VERSION.BASE_OS
                     appVersionCode = BuildConfig.VERSION_CODE
                     appVersionName = BuildConfig.VERSION_NAME
                     name = current.deviceName.ifEmpty { "${Build.BRAND} ${Build.MODEL}" }
@@ -156,6 +160,8 @@ class OnboardingViewModel : ViewModel() {
                             errorMessage = when (response.code()) {
                                 401 -> "Invalid API key. Go back and check your key."
                                 404 -> "Device ID not found. Verify it in your dashboard."
+                                429 -> response.serverErrorMessage()
+                                    ?: "You've reached your plan's device limit. Disable or remove another device, or contact your administrator."
                                 in 500..599 -> "Server error. Please try again in a moment."
                                 else -> "Request failed (${response.code()}). Please try again."
                             }
@@ -172,7 +178,7 @@ class OnboardingViewModel : ViewModel() {
                     else -> "Something went wrong. Please try again."
                 }
                 _state.update { it.copy(isLoading = false, errorMessage = message) }
-                TextBeeUtils.logException(e, "Onboarding device registration failed")
+                TextbeeUtils.logException(e, "Onboarding device registration failed")
             }
         }
     }

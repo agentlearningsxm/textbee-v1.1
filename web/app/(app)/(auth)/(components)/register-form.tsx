@@ -22,6 +22,8 @@ import { signIn } from 'next-auth/react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Routes } from '@/config/routes'
 import { useTurnstile } from '@/lib/turnstile'
+import { readAttribution } from '@/lib/analytics/attribution'
+import { track } from '@/lib/analytics/track'
 
 const registerSchema = z.object({
   name: z
@@ -45,7 +47,13 @@ const registerSchema = z.object({
   path: ['turnstileToken'],
 })
 
-type RegisterFormValues = z.infer<typeof registerSchema>
+// marketingOptIn is `.optional().default(true)`, so zod's input and output
+// types differ: optional going in, guaranteed coming out. The form holds the
+// input shape and the submit handler receives the output shape, which is what
+// useForm's third generic is for. Using z.infer (the output) for both made the
+// resolver unassignable.
+type RegisterFormInput = z.input<typeof registerSchema>
+type RegisterFormValues = z.output<typeof registerSchema>
 
 export default function RegisterForm() {
   const router = useRouter()
@@ -55,7 +63,7 @@ export default function RegisterForm() {
   const inviteCodeFromUrl = searchParams.get('invite')
   const isInviteOnly = process.env.NEXT_PUBLIC_REGISTRATION_MODE === 'invite_only'
 
-  const form = useForm<RegisterFormValues>({
+  const form = useForm<RegisterFormInput, unknown, RegisterFormValues>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
       name: '',
@@ -114,6 +122,11 @@ export default function RegisterForm() {
       return
     }
 
+    // Spread conditionally: next-auth serialises these options through
+    // URLSearchParams, so an undefined value would arrive as the string
+    // "undefined" and fail to parse on the other side.
+    const attribution = readAttribution()
+
     try {
       const result = await signIn('email-password-register', {
         redirect: false,
@@ -123,6 +136,7 @@ export default function RegisterForm() {
         phone: data.phone,
         inviteCode: data.inviteCode,
         marketingOptIn: data.marketingOptIn,
+        ...(attribution && { attribution: JSON.stringify(attribution) }),
         turnstileToken: data.turnstileToken,
       })
 
@@ -141,6 +155,7 @@ export default function RegisterForm() {
           })
         }
       } else {
+        track('sign_up', { method: 'email' })
         router.push(`${Routes.verifyEmail}?verificationEmailSent=1`)
       }
     } catch (error) {

@@ -8,6 +8,8 @@ import com.vernu.sms.WebUrls
 import com.vernu.sms.helpers.SharedPreferenceHelper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -56,6 +58,7 @@ fun SetupCompleteScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -223,6 +226,19 @@ fun SetupCompleteScreen(
         ) {
             Text(
                 text = "New to textbee? Read the quickstart guide",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        TextButton(
+            onClick = {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/textbee/textbee?ref=android-star"))
+                )
+            }
+        ) {
+            Text(
+                text = "textbee is open source. Star it on GitHub.",
                 style = MaterialTheme.typography.bodySmall
             )
         }

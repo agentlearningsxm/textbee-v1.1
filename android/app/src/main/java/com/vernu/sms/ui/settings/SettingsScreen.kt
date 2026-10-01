@@ -15,6 +15,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -27,8 +30,8 @@ import com.vernu.sms.WebUrls
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onSwitchToLegacy: () -> Unit,
     onNavigateToFilters: () -> Unit,
+    onNavigateToHealth: () -> Unit,
     onDisconnect: () -> Unit,
     viewModel: SettingsViewModel = viewModel()
 ) {
@@ -38,7 +41,6 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showDisconnectDialog by remember { mutableStateOf(false) }
-    var showLegacyDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showDeviceNameDialog by remember { mutableStateOf(false) }
     var editedDeviceName by remember(state.deviceName) { mutableStateOf(state.deviceName) }
@@ -50,6 +52,15 @@ fun SettingsScreen(
             snackbarHostState.showSnackbar(it)
             viewModel.clearSnackbar()
         }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(
@@ -188,6 +199,21 @@ fun SettingsScreen(
 
             SettingsSectionHeader("System")
 
+            SettingsRow(
+                icon = Icons.Default.HealthAndSafety,
+                title = "Device health",
+                subtitle = when (state.healthIssueCount) {
+                    0 -> "All checks pass"
+                    1 -> "1 item to check"
+                    else -> "${state.healthIssueCount} items to check"
+                },
+                onClick = onNavigateToHealth,
+                trailing = {
+                    Icon(Icons.Default.ChevronRight, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            )
+
             SettingsSwitchRow(
                 icon = Icons.Default.NotificationsActive,
                 title = "Sticky Notification",
@@ -241,6 +267,19 @@ fun SettingsScreen(
             )
 
             SettingsRow(
+                icon = Icons.Default.Forum,
+                title = "Join our Discord",
+                subtitle = "Get help from the community",
+                onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://textbee.dev/discord")))
+                },
+                trailing = {
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                }
+            )
+
+            SettingsRow(
                 icon = Icons.Default.Share,
                 title = "Share textbee",
                 subtitle = "Help spread the word",
@@ -255,7 +294,7 @@ fun SettingsScreen(
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_TEXT, shareText)
                             },
-                            "Share TextBee"
+                            "Share textbee"
                         )
                     )
                 }
@@ -284,19 +323,6 @@ fun SettingsScreen(
                 trailing = {
                     Icon(Icons.Default.OpenInBrowser, contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                }
-            )
-
-            SettingsSectionHeader("UI")
-
-            SettingsRow(
-                icon = Icons.Default.SwapHoriz,
-                title = "Switch to Legacy UI",
-                subtitle = "Use the original interface",
-                onClick = { showLegacyDialog = true },
-                trailing = {
-                    Icon(Icons.Default.ChevronRight, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             )
 
@@ -361,23 +387,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showLegacyDialog) {
-        AlertDialog(
-            onDismissRequest = { showLegacyDialog = false },
-            title = { Text("Switch to Legacy UI?") },
-            text = { Text("You can switch back from the Legacy Settings screen anytime.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showLegacyDialog = false
-                    onSwitchToLegacy()
-                }) { Text("Switch") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLegacyDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
@@ -402,7 +411,7 @@ fun SettingsScreen(
                         }
                         OutlinedButton(
                             onClick = {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/vernu/textbee")))
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/textbee/textbee")))
                             }
                         ) {
                             Text("GitHub")

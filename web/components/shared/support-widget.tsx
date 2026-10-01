@@ -8,9 +8,13 @@ export default function SupportWidget() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [message, setMessage] = useState('')
+  const [resultMessage, setResultMessage] = useState('')
+  const [submissionLocked, setSubmissionLocked] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (submissionLocked) return
+    setSubmissionLocked(true)
     setStatus('sending')
     try {
       const res = await fetch('/api/support', {
@@ -18,12 +22,21 @@ export default function SupportWidget() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, phone, message }),
       })
-      if (!res.ok) throw new Error('failed')
+      const result = await res.json()
+      if (!res.ok || result.ok !== true) {
+        setResultMessage(`Support notification: ${result.owner?.outcome ?? 'unknown'}. Confirmation text: ${result.visitor?.outcome ?? 'unknown'}. Please wait for support before sending again to avoid duplicates.`)
+        setStatus('error')
+        return
+      }
+      setResultMessage(result.visitor?.outcome === 'accepted'
+        ? 'Your request and confirmation text were accepted for sending. We will text you back soon.'
+        : `Your support request was accepted. Confirmation text: ${result.visitor?.outcome ?? 'unknown'}. Please wait for our reply; do not resend this request.`)
       setStatus('sent')
       setName('')
       setPhone('')
       setMessage('')
     } catch {
+      setResultMessage('The request outcome is unknown. Please wait for support before sending again to avoid duplicates.')
       setStatus('error')
     }
   }
@@ -32,7 +45,8 @@ export default function SupportWidget() {
     <>
       {/* Chat bubble button */}
       <button
-        onClick={() => setStatus(s => s === 'open' || s === 'sent' || s === 'error' ? 'idle' : 'open')}
+        disabled={status === 'sending'}
+        onClick={() => setStatus(s => s === 'open' || s === 'sent' || s === 'error' ? 'idle' : submissionLocked ? 'error' : 'open')}
         className="fixed bottom-6 right-6 z-50 flex items-center justify-center w-14 h-14 rounded-full bg-amber-500 hover:bg-amber-400 shadow-lg transition-colors"
         aria-label="Contact support"
       >
@@ -72,19 +86,16 @@ export default function SupportWidget() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-white font-medium">Message sent!</p>
-                <p className="text-zinc-400 text-sm mt-1">We got your message — you'll receive a confirmation text shortly, and we'll text you back soon.</p>
-                <button onClick={() => setStatus('open')} className="mt-4 text-amber-400 text-sm hover:underline">
-                  Send another
+                <p className="text-white font-medium">Request accepted</p>
+                <p className="text-zinc-400 text-sm mt-1">{resultMessage}</p>
+                <button onClick={() => { setSubmissionLocked(false); setStatus('open') }} className="mt-4 text-amber-400 text-sm hover:underline">
+                  Start new request
                 </button>
               </div>
             ) : status === 'error' ? (
               <div className="text-center py-6">
-                <p className="text-white font-medium">Something went wrong</p>
-                <p className="text-zinc-400 text-sm mt-1">Please try again.</p>
-                <button onClick={() => setStatus('open')} className="mt-4 text-amber-400 text-sm hover:underline">
-                  Try again
-                </button>
+                <p className="text-white font-medium">Support request result</p>
+                <p className="text-zinc-400 text-sm mt-1">{resultMessage}</p>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-3">
@@ -123,7 +134,7 @@ export default function SupportWidget() {
                 </div>
                 <button
                   type="submit"
-                  disabled={status === 'sending'}
+                  disabled={status === 'sending' || submissionLocked}
                   className="w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-sm font-semibold disabled:opacity-60 transition-colors"
                 >
                   {status === 'sending' ? 'Sending…' : 'Send message'}

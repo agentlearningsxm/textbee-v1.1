@@ -3,25 +3,24 @@ import '@/styles/main.css'
 import { authOptions } from '@/lib/auth'
 import { getServerSession, Session } from 'next-auth'
 import AppHeader from '@/components/shared/app-header'
-import LayoutWrapper from './layout-wrapper'
-import Analytics from '@/components/shared/analytics'
+import Providers from './providers'
+import AnalyticsIdentify from '@/components/shared/analytics-identify'
 import { Toaster } from '@/components/ui/toaster'
-import Footer from '@/components/shared/footer'
 import SupportWidget from '@/components/shared/support-widget'
 
 export default async function RootLayout({ children }: PropsWithChildren) {
   const session: Session | null = await getServerSession(authOptions as any)
 
   return (
-    <>
-      <LayoutWrapper session={session}>
-        <AppHeader session={session} />
-        <main className='min-h-[80vh]'>{children}</main>
-        <Analytics user={session?.user} />
-        <Footer />
-        <SupportWidget />
-        <Toaster />
-      </LayoutWrapper>
-    </>
+    <Providers session={session}>
+      <AppHeader session={session} />
+      {/* No <Footer /> here: the dashboard's sidebar is fixed-position, so a
+          full-width footer at this level gets painted over on its left edge.
+          Each section renders the footer inside its own content column. */}
+      <main className='min-h-[80vh]'>{children}</main>
+      <AnalyticsIdentify />
+      <SupportWidget />
+      <Toaster />
+    </Providers>
   )
 }

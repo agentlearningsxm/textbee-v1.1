@@ -1,12 +1,16 @@
 import { PropsWithChildren } from 'react'
 import '@/styles/main.css'
 import { Metadata } from 'next'
-import Footer from '@/components/shared/footer'
-import { Toaster } from '@/components/ui/toaster'
+import { Inter } from 'next/font/google'
+import ThemeProvider from './theme-provider'
 import Analytics from '@/components/shared/analytics'
-import { Session } from 'next-auth'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import AttributionCapture from '@/components/shared/attribution-capture'
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'Reynubix — Secure SMS Gateway',
@@ -15,9 +19,20 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: PropsWithChildren) {
   return (
-    <html lang='en'>
-      <body>
-        <main>{children}</main>
+    <html lang='en' suppressHydrationWarning className={inter.variable}>
+      {/* No <main> here: the (app) layout renders its own, and nesting
+          <main> inside <main> is invalid HTML. */}
+      <body className='font-sans antialiased'>
+        <ThemeProvider
+          attribute='class'
+          defaultTheme='system'
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+        <Analytics />
+        <AttributionCapture />
       </body>
     </html>
   )

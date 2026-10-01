@@ -70,11 +70,12 @@ export default function ResetPasswordForm({
   })
 
   const onResetPassword = async (data: ResetPasswordFormValues) => {
+    form.clearErrors()
     try {
       await httpBrowserClient.post(ApiEndpoints.auth.resetPassword(), data)
     } catch (error) {
       console.error(error)
-      form.setError('root.serverError', {
+      form.setError('root', {
         message: 'Failed to reset password',
       })
     }
@@ -195,7 +196,7 @@ export default function ResetPasswordForm({
             </Button>
           </form>
         </Form>
-        {form.formState.isSubmitted && form.formState.isSubmitSuccessful && (
+        {form.formState.isSubmitSuccessful && !form.formState.errors.root && (
           <Alert className='mt-4 border-green-700/40 bg-green-900/20 text-green-200'>
             {/* <Icons.checkCircle className="h-4 w-4" /> */}
             <AlertTitle className='text-green-200'>

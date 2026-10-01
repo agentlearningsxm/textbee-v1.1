@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
-import { Document, Types } from 'mongoose'
+import { Document, SchemaTypes, Types } from 'mongoose'
 import { Device } from './device.schema'
 import { SMSBatch } from './sms-batch.schema'
 import { User } from '../../users/schemas/user.schema'
@@ -8,15 +8,18 @@ export type SMSDocument = SMS & Document
 
 @Schema({ timestamps: true })
 export class SMS {
+  @Prop({ type: Boolean, default: false })
+  recoverySafeAtQueue: boolean
   _id?: Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, ref: User.name, required: true, index: true })
+  // No single-field index: user is the prefix of two compound indexes below
+  @Prop({ type: SchemaTypes.ObjectId, ref: User.name, required: true })
   user: User | Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, ref: Device.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Device.name, required: true })
   device: Device | Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, ref: SMSBatch.name })
+  @Prop({ type: SchemaTypes.ObjectId, ref: SMSBatch.name })
   smsBatch: SMSBatch | Types.ObjectId
 
   @Prop({ type: String })
@@ -45,8 +48,24 @@ export class SMS {
   @Prop({ type: Date })
   requestedAt: Date
 
+  // When the queue is due to hand this message to the push service; set for
+  // queued messages that wait server-side first (paced waves, scheduled sends)
+  @Prop({ type: Date })
+  dispatchDueAt?: Date
+
   @Prop({ type: Date })
   dispatchedAt: Date
+
+  // How many times the message has been handed to the push service
+  @Prop({ type: Number })
+  dispatchAttempts?: number
+
+  // Reported by the phone: when it got the push, and when it called the radio
+  @Prop({ type: Date })
+  pushReceivedAt?: Date
+
+  @Prop({ type: Date })
+  sendAttemptedAt?: Date
 
   @Prop({ type: Date })
   sentAt: Date
@@ -79,9 +98,21 @@ export class SMS {
   @Prop({ type: Number, required: false })
   simSubscriptionId?: number
 
-  // misc metadata for debugging
-  @Prop({ type: Object })
+  // misc metadata for debugging, not part of the public message shape
+  @Prop({ type: Object, select: false })
   metadata: Record<string, any>
+
+  // received while the account was over its plan limit
+  @Prop({ type: Boolean })
+  overLimit?: boolean
+
+  // upload time, kept when createdAt is moved back to receivedAt
+  @Prop({ type: Date })
+  originalCreatedAt?: Date
+
+  // set by { timestamps: true }; declared here for typing only, no @Prop
+  createdAt?: Date
+  updatedAt?: Date
 }
 
 export const SMSSchema = SchemaFactory.createForClass(SMS)
@@ -89,3 +120,10 @@ export const SMSSchema = SchemaFactory.createForClass(SMS)
 
 SMSSchema.index({ device: 1, type: 1, receivedAt: -1 })
 SMSSchema.index({ user: 1, createdAt: -1, type: 1 })
+// Serves account-level keyset pagination: the sort is (createdAt, _id) and no
+// other index can supply it. Build on Atlas before deploying; autoIndex would
+// otherwise build it at boot.
+SMSSchema.index({ user: 1, createdAt: -1, _id: -1 })
+// Serves the per-device recovery poll and its count on every heartbeat.
+// Build on Atlas before deploying.
+SMSSchema.index({ device: 1, status: 1, requestedAt: -1 })

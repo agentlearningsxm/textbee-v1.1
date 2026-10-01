@@ -9,7 +9,7 @@ import com.vernu.sms.BuildConfig
  * [BuildConfig.WEB_BASE_URL] so self-hosted builds send users to the operator's own dashboard
  * rather than the upstream hosted site.
  *
- * Routes that have no self-hosted equivalent (docs, privacy-policy, terms-of-service, pricing)
+ * Routes that have no self-hosted equivalent (docs, privacy-policy, terms-of-service)
  * fall back to the upstream project site so the user still lands somewhere useful.
  */
 object WebUrls {
@@ -46,6 +46,9 @@ object WebUrls {
     fun privacyPolicy(): String = "$UPSTREAM_BASE_URL/privacy-policy"
 
     fun termsOfService(): String = "$UPSTREAM_BASE_URL/terms-of-service"
+
+    fun canPurchasePlans(flavor: String = BuildConfig.FLAVOR): Boolean =
+        !flavor.equals("selfhosted", ignoreCase = true)
 
     fun pricing(): String = "$UPSTREAM_BASE_URL/pricing"
 }

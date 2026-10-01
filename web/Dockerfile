@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
-RUN npm install -g pnpm@9
+RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
 
 # Copy package.json and pnpm-lock.yaml
 COPY package.json pnpm-lock.yaml ./
@@ -18,7 +18,7 @@ WORKDIR /app
 
 # Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
-RUN npm install -g pnpm@9
+RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -49,7 +49,7 @@ WORKDIR /app
 
 # Install required OpenSSL dependencies
 RUN apk add --no-cache openssl openssl-dev
-RUN npm install -g pnpm@9
+RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
 
 # Set environment variables
 ENV NODE_ENV production

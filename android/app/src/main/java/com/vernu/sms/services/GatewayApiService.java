@@ -7,6 +7,7 @@ import com.vernu.sms.dtos.RegisterDeviceInputDTO;
 import com.vernu.sms.dtos.RegisterDeviceResponseDTO;
 import com.vernu.sms.dtos.HeartbeatInputDTO;
 import com.vernu.sms.dtos.HeartbeatResponseDTO;
+import com.vernu.sms.dtos.PendingMessagesResponseDTO;
 
 import retrofit2.Call;
 import retrofit2.http.Body;
@@ -35,4 +36,7 @@ public interface GatewayApiService {
 
     @POST("gateway/devices/{deviceId}/heartbeat")
     Call<HeartbeatResponseDTO> heartbeat(@Path("deviceId") String deviceId, @Header("x-api-key") String apiKey, @Body() HeartbeatInputDTO body);
+
+    @GET("gateway/devices/{deviceId}/messages/pending")
+    Call<PendingMessagesResponseDTO> getPendingMessages(@Path("deviceId") String deviceId, @Header("x-api-key") String apiKey);
 }

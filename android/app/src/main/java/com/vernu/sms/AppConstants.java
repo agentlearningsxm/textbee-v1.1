@@ -4,6 +4,12 @@ import android.Manifest;
 
 public class AppConstants {
     public static final String API_BASE_URL = BuildConfig.API_BASE_URL;
+
+    // Names this app in outgoing requests. The API key is shared with any code
+    // a customer writes, so without this a request from the app and one from
+    // their own server look identical.
+    public static final String CLIENT_HEADER = "x-sdk-client";
+    public static final String CLIENT_NAME = "textbee-android/" + BuildConfig.VERSION_NAME;
     public static final String[] requiredPermissions = new String[]{
             Manifest.permission.SEND_SMS,
             Manifest.permission.RECEIVE_SMS,
@@ -34,4 +40,19 @@ public class AppConstants {
     public static final String SHARED_PREFS_CONSECUTIVE_AUTH_FAILURES_KEY = "CONSECUTIVE_AUTH_FAILURES";
     public static final String SHARED_PREFS_USE_NEW_UI_KEY = "USE_NEW_UI";
     public static final String SHARED_PREFS_LAST_HEARTBEAT_MS_KEY = "LAST_HEARTBEAT_MS";
+
+    // Settings the server returns on every heartbeat
+    public static final String SHARED_PREFS_CONFIG_SEND_SCHEDULER_V2_KEY = "CONFIG_SEND_SCHEDULER_V2_ENABLED";
+    public static final String SHARED_PREFS_CONFIG_RECOVERY_POLL_KEY = "CONFIG_RECOVERY_POLL_ENABLED";
+    public static final String SHARED_PREFS_CONFIG_UPDATE_NOTIFICATIONS_KEY = "CONFIG_UPDATE_NOTIFICATIONS_ENABLED";
+    public static final String SHARED_PREFS_CONFIG_LATEST_VERSION_CODE_KEY = "CONFIG_LATEST_VERSION_CODE";
+    public static final String SHARED_PREFS_CONFIG_LATEST_VERSION_NAME_KEY = "CONFIG_LATEST_VERSION_NAME";
+
+    // Send pacing without sleeping inside a worker
+    public static final String SHARED_PREFS_NEXT_SEND_SLOT_MS_KEY = "NEXT_SEND_SLOT_MS";
+    public static final String SHARED_PREFS_LAST_SEND_RESERVED_AT_MS_KEY = "LAST_SEND_RESERVED_AT_MS";
+    public static final String SHARED_PREFS_NEXT_SEND_EXEC_SLOT_MS_KEY = "NEXT_SEND_EXEC_SLOT_MS";
+    public static final String SHARED_PREFS_LAST_SEND_EXEC_RESERVED_AT_MS_KEY = "LAST_SEND_EXEC_RESERVED_AT_MS";
+    public static final String SHARED_PREFS_LAST_RECOVERY_POLL_MS_KEY = "LAST_RECOVERY_POLL_MS";
+    public static final String SHARED_PREFS_LAST_UPDATE_NOTIFIED_VERSION_CODE_KEY = "LAST_UPDATE_NOTIFIED_VERSION_CODE";
 }

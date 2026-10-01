@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
-import { Document, Types } from 'mongoose'
+import { Document, SchemaTypes, Types } from 'mongoose'
 import { User } from '../../users/schemas/user.schema'
 
 export type DeviceTombstoneDocument = DeviceTombstone & Document
@@ -8,14 +8,18 @@ export type DeviceTombstoneDocument = DeviceTombstone & Document
 export class DeviceTombstone {
   _id?: Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, required: true, unique: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, required: true, unique: true, index: true })
   deviceId: Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, ref: User.name, required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: User.name, required: true, index: true })
   userId: User | Types.ObjectId
 
   @Prop({ type: Date, required: true })
   deletedAt: Date
+
+  // The device document as it stood at deletion time.
+  @Prop({ type: SchemaTypes.Mixed })
+  device?: Record<string, any>
 }
 
 export const DeviceTombstoneSchema =

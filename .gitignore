@@ -28,3 +28,5 @@ latest_*.json
 run_check.json
 service*.json
 services*.json
+# Rendered email previews (pnpm preview:emails)
+api/tmp/

@@ -19,6 +19,7 @@ import { BillingModule } from './billing/billing.module'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { BullModule } from '@nestjs/bull'
 import { SupportModule } from './support/support.module'
+import { AnalyticsModule } from './analytics/analytics.module'
 import { EventEmitterModule } from '@nestjs/event-emitter'
 import { InvitesModule } from './invites/invites.module'
 import { AdminModule } from './admin/admin.module'
@@ -68,6 +69,7 @@ export class LoggerMiddleware implements NestMiddleware {
     AdminModule,
     RegistrationRequestsModule,
     SeedModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController],
   providers: [

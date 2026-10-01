@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vernu.sms.ApiManagerKt
+import com.vernu.sms.WebUrls
 import com.vernu.sms.AppConstants
 import com.vernu.sms.dtos.SendSmsRequest
 import com.vernu.sms.helpers.SharedPreferenceHelper
@@ -20,8 +21,11 @@ data class ComposeState(
     val message: String = "",
     val isSending: Boolean = false,
     val sendError: String? = null,
+    val upgradeUrl: String? = null,
     val sendSuccess: Boolean = false
 )
+
+const val UPGRADE_URL = "https://textbee.dev/pricing?ref=android-quota"
 
 class ComposeViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -43,7 +47,7 @@ class ComposeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearError() {
-        _state.update { it.copy(sendError = null) }
+        _state.update { it.copy(sendError = null, upgradeUrl = null) }
     }
 
     fun clearSuccess() {
@@ -88,12 +92,16 @@ class ComposeViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(isSending = false, sendSuccess = true) }
                 } else {
                     _state.update {
-                        it.copy(isSending = false, sendError = extractErrorMessage(response))
+                        it.copy(
+                            isSending = false,
+                            sendError = extractErrorMessage(response),
+                            upgradeUrl = if (response.code() == 429 && WebUrls.canPurchasePlans()) UPGRADE_URL else null
+                        )
                     }
                 }
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(isSending = false, sendError = "Network error. Please try again.")
+                    it.copy(isSending = false, sendError = "Network error. Please try again.", upgradeUrl = null)
                 }
             }
         }

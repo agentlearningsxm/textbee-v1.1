@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
-import { Document, Types } from 'mongoose'
+import { Document, SchemaTypes, Types } from 'mongoose'
 import { User } from '../../users/schemas/user.schema'
 
 export type DeviceDocument = Device & Document
@@ -11,14 +11,22 @@ export const DEFAULT_SMS_SEND_DELAY_SECONDS = 5
 export class Device {
   _id?: Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, ref: User.name })
+  @Prop({ type: SchemaTypes.ObjectId, ref: User.name })
   user: User | Types.ObjectId
 
   @Prop({ type: Boolean, default: false })
   enabled: boolean
 
+  @Prop({ type: Boolean, default: false })
+  isDefault: boolean
+
   @Prop({ type: String })
   fcmToken: string
+
+  // A legacy poll request or a selfhosted heartbeat selects this transport.
+  // Keep any historical token for rollback; never use it while polling.
+  @Prop({ type: String, enum: ['poll'] })
+  smsTransport?: 'poll'
 
   @Prop({ type: Date })
   fcmTokenUpdatedAt?: Date
@@ -52,6 +60,18 @@ export class Device {
 
   @Prop({ type: String })
   osVersion: string
+
+  @Prop({ type: Number })
+  osApiLevel: number
+
+  // How osVersion was arrived at: reported and fingerprint are measured,
+  // buildId is inferred from the build's leading letter.
+  @Prop({ type: String, enum: ['reported', 'fingerprint', 'buildId'] })
+  osVersionSource: string
+
+  // Raw Build.VERSION.BASE_OS string, kept for per-OEM detail.
+  @Prop({ type: String })
+  osBuildFingerprint: string
 
   @Prop({ type: String })
   appVersionName: string
@@ -184,6 +204,10 @@ export class Device {
           mnc: String,
           countryIso: String,
           subscriptionType: String,
+          serviceState: String,
+          simState: String,
+          isRoaming: Boolean,
+          signalLevel: Number,
         },
       ],
     },
@@ -201,8 +225,63 @@ export class Device {
       mnc?: string
       countryIso?: string
       subscriptionType?: string
+      serviceState?: string
+      simState?: string
+      isRoaming?: boolean
+      signalLevel?: number
     }>
   }
+
+  // What the OS is doing to the app in the background. A device can be online
+  // and healthy here and still not send, which is the case this makes visible.
+  @Prop({
+    type: {
+      isIgnoringBatteryOptimizations: Boolean,
+      isDeviceIdleMode: Boolean,
+      isPowerSaveMode: Boolean,
+      lastUpdated: Date,
+    },
+  })
+  powerInfo: {
+    isIgnoringBatteryOptimizations?: boolean
+    isDeviceIdleMode?: boolean
+    isPowerSaveMode?: boolean
+    lastUpdated?: Date
+  }
+
+  // Permissions and settings inside the app, reported on every heartbeat.
+  @Prop({
+    type: {
+      hasSendSmsPermission: Boolean,
+      hasReceiveSmsPermission: Boolean,
+      hasReadPhoneStatePermission: Boolean,
+      hasPostNotificationsPermission: Boolean,
+      stickyNotificationEnabled: Boolean,
+      usingLegacyUi: Boolean,
+      lastUpdated: Date,
+    },
+  })
+  appStateInfo: {
+    hasSendSmsPermission?: boolean
+    hasReceiveSmsPermission?: boolean
+    hasReadPhoneStatePermission?: boolean
+    hasPostNotificationsPermission?: boolean
+    stickyNotificationEnabled?: boolean
+    usingLegacyUi?: boolean
+    lastUpdated?: Date
+  }
+
+  // Per-device overrides of the settings returned on the heartbeat reply.
+  @Prop({ type: SchemaTypes.Mixed })
+  configOverrides?: Record<string, unknown>
+
+  // Last time the app asked for messages its push may have missed
+  @Prop({ type: Date })
+  lastPendingPollAt?: Date
+
+  // set by { timestamps: true }; declared here for typing only, no @Prop
+  createdAt?: Date
+  updatedAt?: Date
 }
 
 export const DeviceSchema = SchemaFactory.createForClass(Device)
@@ -210,3 +289,4 @@ export const DeviceSchema = SchemaFactory.createForClass(Device)
 // TODO: Add unique compound index AFTER cleaning up existing duplicate devices
 // Uncomment after duplicates are removed from MongoDB
 // DeviceSchema.index({ user: 1, model: 1, buildId: 1 }, { unique: true })
+DeviceSchema.index({ user: 1 })

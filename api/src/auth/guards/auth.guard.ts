@@ -9,8 +9,6 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import { UsersService } from '../../users/users.service'
 import { AuthService } from '../auth.service'
-import { UserRole } from '../../users/user-roles.enum'
-import * as bcrypt from 'bcryptjs'
 
 @Injectable()
 // Guard for authenticating users by either jwt token or api key
@@ -33,30 +31,16 @@ export class AuthGuard implements CanActivate {
         userId = payload.sub
       } catch (e) {
         throw new HttpException(
-          { error: 'Unauthorized' },
+          { error: 'Unauthorized', code: 'AUTH_INVALID' },
           HttpStatus.UNAUTHORIZED,
         )
       }
     } else if (apiKeyString) {
-      const apiKey =
-        await this.authService.findActiveApiKeyByClientKey(apiKeyString)
+      const apiKey = await this.authService.verifyApiKey(apiKeyString)
 
       if (apiKey) {
-        if (bcrypt.compareSync(apiKeyString, apiKey.hashedApiKey)) {
-          userId = apiKey.user
-          request.apiKey = apiKey
-          this.logger.debug(`API Key matched for user: ${userId}`)
-        } else {
-          this.logger.warn(`API Key bcrypt comparison failed for prefix: ${apiKeyString.substr(0, 17)}`)
-        }
-      } else {
-        this.logger.warn(`No API Key found in DB for prefix: ${apiKeyString.substr(0, 17)}`)
-      }
-    } else {
-      if (request.headers.authorization) {
-        this.logger.warn('Authorization header present but not Bearer or invalid')
-      } else {
-        this.logger.warn('No authentication method provided (no Bearer token and no x-api-key)')
+        userId = apiKey.user
+        request.apiKey = apiKey
       }
     }
 
@@ -66,18 +50,7 @@ export class AuthGuard implements CanActivate {
         // Re-check account state on every request, not just at login. Otherwise a
         // banned or de-approved user keeps full access until their (up to 60-day)
         // JWT expires. Admins are always exempt from the approval gate.
-        if (user.isBanned) {
-          throw new HttpException(
-            { error: 'Your account has been suspended. Please contact support for assistance.' },
-            HttpStatus.FORBIDDEN,
-          )
-        }
-        if (user.role !== UserRole.ADMIN && !user.isApproved) {
-          throw new HttpException(
-            { error: 'Your account is awaiting administrator approval.' },
-            HttpStatus.FORBIDDEN,
-          )
-        }
+        this.authService.assertApproved(user)
         request.user = user
         this.authService.trackAccessLog({ request })
         return true
@@ -85,13 +58,7 @@ export class AuthGuard implements CanActivate {
     }
 
     throw new HttpException(
-      {
-        error: 'Unauthorized',
-        code: apiKeyString ? 'INVALID_API_KEY' : 'NO_CREDENTIALS',
-        message: apiKeyString
-          ? 'API key is invalid, revoked, or does not exist. Please generate a new key from the dashboard.'
-          : 'No authentication credentials provided.',
-      },
+      { error: 'Unauthorized', code: 'AUTH_INVALID' },
       HttpStatus.UNAUTHORIZED,
     )
   }

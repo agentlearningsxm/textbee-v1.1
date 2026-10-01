@@ -45,7 +45,7 @@ export class InvitesService {
 
     // Send invite email (fire-and-forget — don't block response on SMTP timeout)
     if (email) {
-      const frontendUrl = process.env.FRONTEND_URL || 'https://textbee.dev'
+      const frontendUrl = process.env.FRONTEND_URL || 'https://textbee-cloud.vercel.app'
       const registerUrl = `${frontendUrl}/register?invite=${code}`
 
       setImmediate(() => {

@@ -1,26 +1,32 @@
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { httpServerClient } from './httpServerClient'
-import { DefaultSession } from 'next-auth'
+import type { DefaultSession, NextAuthOptions } from 'next-auth'
 import { ApiEndpoints } from '@/config/api'
 import { Routes } from '@/config/routes'
+import { clientContextFromHeaders } from '@/lib/analytics/client-context'
 
 // add custom fields to the session and user interfaces
 declare module 'next-auth' {
   interface Session {
     user: {
       id?: string
-      role?: 'ADMIN' | 'REGULAR'
+      role?: string
       phone?: string
       avatar?: string
       accessToken?: string
+      isNewUser?: boolean
     } & DefaultSession['user']
   }
 
   interface User {
+    // The backend returns Mongo documents, so the id arrives as _id and is
+    // copied onto the token below.
+    _id?: string
+    role?: string
     phone?: string
     avatar?: string
     accessToken?: string
-    role?: 'ADMIN' | 'REGULAR'
+    isNewUser?: boolean
   }
 }
 
@@ -28,14 +34,29 @@ declare module 'next-auth' {
 declare module 'next-auth/jwt' {
   interface JWT {
     id?: string
-    role?: 'ADMIN' | 'REGULAR'
+    role?: string
     phone?: string
     avatar?: string
     accessToken?: string
+    isNewUser?: boolean
   }
 }
 
-export const authOptions = {
+
+// Credentials cross the wire as strings, so the attribution blob arrives as
+// JSON. A bad value must not block a signup, so parsing failures are dropped.
+function parseAttribution(raw: unknown) {
+  if (typeof raw !== 'string' || !raw || raw === 'undefined') return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
   providers: [
     CredentialsProvider({
       id: 'email-password-login',
@@ -45,13 +66,18 @@ export const authOptions = {
         password: { label: 'Password', type: 'password' },
         turnstileToken: { label: 'Turnstile Token', type: 'text' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
+        // NextAuth can invoke authorize with no credentials at all. There is
+        // nothing to authenticate in that case, so refuse rather than posting
+        // undefined fields to the login endpoint.
+        if (!credentials) return null
         const { email, password, turnstileToken } = credentials
         try {
           const res = await httpServerClient.post(ApiEndpoints.auth.login(), {
             email,
             password,
             turnstileToken,
+            client: clientContextFromHeaders(req?.headers),
           })
 
           const user = res.data.data.user
@@ -77,9 +103,12 @@ export const authOptions = {
         name: { label: 'Name', type: 'text' },
         phone: { label: 'Phone', type: 'text' },
         inviteCode: { label: 'Invite Code', type: 'text' },
+        marketingOptIn: { label: 'Marketing Opt In', type: 'text' },
+        attribution: { label: 'Attribution', type: 'text' },
         turnstileToken: { label: 'Turnstile Token', type: 'text' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
+        if (!credentials) return null
         const { email, password, name, phone, inviteCode, turnstileToken } = credentials
         try {
           const res = await httpServerClient.post(
@@ -90,6 +119,12 @@ export const authOptions = {
               name,
               phone,
               inviteCode,
+              // Arrives as a string, and Boolean('false') is true.
+              marketingOptIn: credentials.marketingOptIn === 'true',
+              attribution: parseAttribution(credentials.attribution),
+              // Without this the API would record this server's address and
+              // user agent instead of the visitor's.
+              client: clientContextFromHeaders(req?.headers),
               turnstileToken,
             }
           )
@@ -112,14 +147,18 @@ export const authOptions = {
       name: 'google-id-token-login',
       credentials: {
         idToken: { label: 'idToken', type: 'text' },
+        attribution: { label: 'Attribution', type: 'text' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
+        if (!credentials) return null
         const { idToken } = credentials
         try {
           const res = await httpServerClient.post(
             ApiEndpoints.auth.signInWithGoogle(),
             {
               idToken,
+              attribution: parseAttribution(credentials.attribution),
+              client: clientContextFromHeaders(req?.headers),
             }
           )
 
@@ -129,6 +168,7 @@ export const authOptions = {
           return {
             ...user,
             accessToken,
+            isNewUser: res.data.data.isNewUser === true,
           }
         } catch (e) {
           console.log(e)
@@ -162,6 +202,7 @@ export const authOptions = {
         token.accessToken = user.accessToken
         token.avatar = user.avatar
         token.phone = user.phone
+        token.isNewUser = user.isNewUser
       }
       return token
     },
@@ -171,6 +212,7 @@ export const authOptions = {
       session.user.accessToken = token.accessToken
       session.user.avatar = token.avatar
       session.user.phone = token.phone
+      session.user.isNewUser = token.isNewUser
       return session
     },
   },

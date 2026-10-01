@@ -5,13 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vernu.sms.ApiManagerKt
 import com.vernu.sms.AppConstants
-import com.vernu.sms.TextBeeUtils
+import com.vernu.sms.TextbeeUtils
 import com.vernu.sms.dtos.RegisterDeviceInputDTO
 import com.vernu.sms.dtos.SimInfoDTO
 import com.vernu.sms.dtos.SubscriptionResponse
 import com.vernu.sms.dtos.UserProfile
 import com.vernu.sms.helpers.HeartbeatManager
 import com.vernu.sms.helpers.SharedPreferenceHelper
+import com.vernu.sms.helpers.serverErrorMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,8 @@ data class DashboardState(
     val subscriptionUnavailable: Boolean = false,
     val userProfile: UserProfile? = null,
     val availableSims: List<SimInfoDTO> = emptyList(),
-    val isReceiveSmsEnabled: Boolean = false
+    val isReceiveSmsEnabled: Boolean = false,
+    val userMessage: String? = null
 )
 
 class DashboardViewModel(app: Application) : AndroidViewModel(app) {
@@ -67,7 +69,7 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
         val lastHeartbeatMs = lastHeartbeatStr?.toLongOrNull()
 
         val sims = try {
-            TextBeeUtils.collectSimInfo(context)
+            TextbeeUtils.collectSimInfo(context)
         } catch (e: Exception) {
             emptyList<SimInfoDTO>()
         }
@@ -89,7 +91,7 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
         // Restart sticky notification service on every launch if it should be running,
         // matching legacy MainActivity behaviour (service is killed by OS on modern Android).
         if (isEnabled) {
-            TextBeeUtils.startStickyNotificationService(context)
+            TextbeeUtils.startStickyNotificationService(context)
             if (deviceId.isNotEmpty()) HeartbeatManager.scheduleHeartbeat(context)
         }
     }
@@ -106,7 +108,7 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(userProfile = response.body()?.data) }
                 }
             } catch (e: Exception) {
-                TextBeeUtils.logException(e, "User profile fetch failed")
+                TextbeeUtils.logException(e, "User profile fetch failed")
             }
         }
     }
@@ -130,9 +132,13 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isSubscriptionLoading = false, subscriptionUnavailable = true) }
-                TextBeeUtils.logException(e, "Subscription fetch failed")
+                TextbeeUtils.logException(e, "Subscription fetch failed")
             }
         }
+    }
+
+    fun consumeUserMessage() {
+        _state.update { it.copy(userMessage = null) }
     }
 
     fun setReceiveSms(enabled: Boolean) {
@@ -165,19 +171,35 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                                     context, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false
                                 )
                             ) {
-                                TextBeeUtils.startStickyNotificationService(context)
+                                TextbeeUtils.startStickyNotificationService(context)
                             }
                             HeartbeatManager.scheduleHeartbeat(context)
                         } else {
-                            TextBeeUtils.stopStickyNotificationService(context)
+                            TextbeeUtils.stopStickyNotificationService(context)
                             HeartbeatManager.cancelHeartbeat(context)
                         }
                     } catch (e: Exception) {
-                        TextBeeUtils.logException(e, "Gateway service toggle failed")
+                        TextbeeUtils.logException(e, "Gateway service toggle failed")
                     }
+                    _state.update {
+                        it.copy(
+                            userMessage = if (enabled) "Gateway enabled" else "Gateway disabled"
+                        )
+                    }
+                } else {
+                    // Surface the server's reason (e.g. device-limit 429) so the
+                    // toggle doesn't silently snap back with no explanation.
+                    val message = response.serverErrorMessage()
+                        ?: if (response.code() == 429) {
+                            "You've reached your plan's device limit. Disable or remove another device, or contact your administrator."
+                        } else {
+                            "Couldn't update the gateway. Please try again."
+                        }
+                    _state.update { it.copy(userMessage = message) }
                 }
             } catch (e: Exception) {
-                TextBeeUtils.logException(e, "Gateway toggle failed")
+                TextbeeUtils.logException(e, "Gateway toggle failed")
+                _state.update { it.copy(userMessage = "Couldn't update the gateway. Please check your connection.") }
             } finally {
                 _state.update { it.copy(isTogglingGateway = false) }
             }

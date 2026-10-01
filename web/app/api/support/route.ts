@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readSmsSendResult, type SmsSendResult } from '@/lib/api/sms-send-result'
 
 export async function POST(req: NextRequest) {
   const { name, phone, message } = await req.json()
@@ -67,21 +68,23 @@ export async function POST(req: NextRequest) {
     }),
   ])
 
-  // The owner notification is the critical one. If it failed, report an error.
-  if (ownerRes.status !== 'fulfilled' || !ownerRes.value.ok) {
-    const detail =
-      ownerRes.status === 'fulfilled' ? await ownerRes.value.text().catch(() => '') : String(ownerRes.reason)
-    console.error('[support] Owner SMS failed:', detail)
-    return NextResponse.json({ error: 'Failed to send message' }, { status: 500 })
+  async function outcome(response: PromiseSettledResult<Response>): Promise<SmsSendResult> {
+    if (response.status !== 'fulfilled') return { outcome: 'unknown', unknownCount: 1 }
+    if (!response.value.ok) {
+      return response.value.status >= 500
+        ? { outcome: 'unknown', unknownCount: 1 }
+        : { outcome: 'failed', failureCount: 1 }
+    }
+    return readSmsSendResult(await response.value.json().catch(() => null), 1)
   }
 
-  // Visitor auto-reply is best-effort; don't fail the whole request over it,
-  // but log so we know if the owner needs to reply manually.
-  if (visitorRes.status !== 'fulfilled' || !visitorRes.value.ok) {
-    const detail =
-      visitorRes.status === 'fulfilled' ? await visitorRes.value.text().catch(() => '') : String(visitorRes.reason)
-    console.error('[support] Visitor auto-reply SMS failed:', detail)
-  }
-
-  return NextResponse.json({ ok: true })
+  const [owner, visitor] = await Promise.all([outcome(ownerRes), outcome(visitorRes)])
+  // Retain both outcomes; a failed confirmation must never invite resending
+  // the owner notification. Expose only counts, not gateway payloads or IDs.
+  const publicResult = ({ smsBatchId: _batch, ...result }: SmsSendResult) => result
+  return NextResponse.json({
+    ok: owner.outcome === 'accepted',
+    owner: publicResult(owner),
+    visitor: publicResult(visitor),
+  })
 }

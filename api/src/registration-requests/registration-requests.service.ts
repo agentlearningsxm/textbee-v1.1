@@ -179,7 +179,7 @@ export class RegistrationRequestsService {
     await request.save()
 
     // Send approval email (fire-and-forget — don't block the response on SMTP timeout)
-    const frontendUrl = process.env.FRONTEND_URL || 'https://textbee.dev'
+    const frontendUrl = process.env.FRONTEND_URL || 'https://textbee-cloud.vercel.app'
     setImmediate(() => {
       this.mailService
         .sendEmailFromTemplate({

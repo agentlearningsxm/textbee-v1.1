@@ -1,10 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  i18n: {
-    locales: ['en-US'],
-    defaultLocale: 'en-US',
-  },
   output: 'standalone',
 
   async redirects() {
@@ -17,6 +13,13 @@ const nextConfig = {
       {
         source: '/android',
         destination: '/download',
+        permanent: false,
+      },
+      // The invite itself lives behind textbee.dev/discord, so it can rotate
+      // in one place.
+      {
+        source: '/discord',
+        destination: 'https://textbee.dev/discord',
         permanent: false,
       },
     ]

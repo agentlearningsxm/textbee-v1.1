@@ -19,10 +19,11 @@ import com.vernu.sms.AppConstants
 import com.vernu.sms.R
 import com.vernu.sms.activities.MainActivity
 import com.vernu.sms.dtos.PendingSMSResponseDTO
-import com.vernu.sms.helpers.SMSHelper
+import com.vernu.sms.helpers.DeviceLog
 import com.vernu.sms.helpers.SharedPreferenceHelper
 import com.vernu.sms.models.SMSPayload
 import com.vernu.sms.receivers.AlarmReceiver
+import com.vernu.sms.workers.SmsSendWorker
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -41,6 +42,7 @@ class StickyNotificationService : Service() {
     private var alarmManager: AlarmManager? = null
     private var alarmPendingIntent: PendingIntent? = null
     private var isPolling = false
+    private var pollInFlight = false
 
     override fun onBind(intent: Intent?): IBinder? {
         Log.i(TAG, "Service onBind ${intent?.action}")
@@ -145,14 +147,6 @@ class StickyNotificationService : Service() {
         stopSelf(startId)
     }
 
-    private fun startPolling() {
-        if (isPolling) return
-        isPolling = true
-        pollForPendingSMS()
-        scheduleNextPoll()
-        Log.i(TAG, "Started AlarmManager polling every ${POLLING_INTERVAL_MS / 1000} seconds")
-    }
-
     private fun scheduleNextPoll() {
         if (!isPolling) return
 
@@ -223,6 +217,7 @@ class StickyNotificationService : Service() {
     }
 
     private fun pollForPendingSMS() {
+        if (pollInFlight) return
         val deviceId = SharedPreferenceHelper.getSharedPreferenceString(
             applicationContext,
             AppConstants.SHARED_PREFS_DEVICE_ID_KEY,
@@ -245,12 +240,15 @@ class StickyNotificationService : Service() {
             return
         }
 
+        pollInFlight = true
         ApiManager.getApiService().getPendingSMS(deviceId, apiKey, 10)
             .enqueue(object : Callback<PendingSMSResponseDTO> {
                 override fun onResponse(
                     call: Call<PendingSMSResponseDTO>,
                     response: Response<PendingSMSResponseDTO>,
                 ) {
+                    pollInFlight = false
+                    if (!isPolling) return
                     val body = response.body()
                     val data = body?.data
                     if (!response.isSuccessful || data == null) {
@@ -273,6 +271,7 @@ class StickyNotificationService : Service() {
                 }
 
                 override fun onFailure(call: Call<PendingSMSResponseDTO>, t: Throwable) {
+                    pollInFlight = false
                     Log.e(TAG, "Error polling for pending SMS: ${t.message}")
                     scheduleNextPoll()
                 }
@@ -303,30 +302,13 @@ class StickyNotificationService : Service() {
 
     private fun sendSMS(smsPayload: SMSPayload?) {
         if (smsPayload == null) return
-        val recipients = smsPayload.recipients ?: smsPayload.receivers ?: return
-        val message = smsPayload.message ?: smsPayload.smsBody ?: return
-        val smsId = smsPayload.smsId ?: return
-        val smsBatchId = smsPayload.smsBatchId ?: ""
-        val preferredSim = SharedPreferenceHelper.getSharedPreferenceInt(
-            applicationContext,
-            AppConstants.SHARED_PREFS_PREFERRED_SIM_KEY,
-            -1,
-        )
-
-        recipients.forEach { recipient ->
-            if (preferredSim == -1) {
-                SMSHelper.sendSMS(recipient, message, smsId, smsBatchId, applicationContext)
-            } else {
-                SMSHelper.sendSMSFromSpecificSim(
-                    recipient,
-                    message,
-                    preferredSim,
-                    smsId,
-                    smsBatchId,
-                    applicationContext,
-                )
-            }
+        val receivedAt = System.currentTimeMillis()
+        val count = smsPayload.forEachSend { recipient, message, smsId, smsBatchId, simId ->
+            SmsSendWorker.enqueue(
+                applicationContext, recipient, message, smsId, smsBatchId, simId, receivedAt
+            )
         }
+        DeviceLog.log(applicationContext, "poll_received", "$count recipient(s)", smsPayload.smsId)
     }
 
     private fun showAuthErrorNotification() {
@@ -379,6 +361,7 @@ class StickyNotificationService : Service() {
                 description = "Keeps the SMS gateway active in background"
             }
             notificationManager.createNotificationChannel(channel)
+
         }
 
         val pendingIntent = PendingIntent.getActivity(

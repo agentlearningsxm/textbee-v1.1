@@ -17,6 +17,7 @@ import {
   SupportCategory,
 } from './dto/create-support-message.dto'
 import { MailService } from '../mail/mail.service'
+import { firstName } from '../mail/first-name'
 
 @Injectable()
 export class SupportService {
@@ -32,10 +33,11 @@ export class SupportService {
   ): Promise<{ message: string }> {
     const { turnstileToken, ...sanitizedDto } = createSupportMessageDto
     try {
-      // Check rate limit: max 3 requests per 24 hours
+      // Check rate limit: max 3 requests per 24 hours.
+      // Keyed on the authenticated user, not the self-reported email.
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
       const recentRequestsCount = await this.supportMessageModel.countDocuments({
-        email: sanitizedDto.email,
+        user: sanitizedDto.user,
         createdAt: { $gte: twentyFourHoursAgo },
       })
 
@@ -67,7 +69,7 @@ export class SupportService {
         subject: `Support Request Submitted: ${createSupportMessageDto.category}-${savedMessage._id}`,
         template: 'customer-support-confirmation',
         context: {
-          name: createSupportMessageDto.name,
+          name: firstName(createSupportMessageDto.name),
           email: sanitizedDto.email,
           phone: sanitizedDto.phone || 'Not provided',
           category: sanitizedDto.category,
@@ -141,7 +143,7 @@ export class SupportService {
         subject: `Account Deletion Request: ${savedMessage._id}`,
         template: 'account-deletion-request',
         context: {
-          name: user.name,
+          name: firstName(user.name),
           email: user.email,
           message: sanitizedDto.message || 'No reason provided',
           appLogoUrl:

@@ -36,8 +36,9 @@ The app now supports three build variants:
 
 #### For Selfhosted:
 - `app/src/selfhosted/google-services.json` is a placeholder so local self-hosted builds can compile without private Firebase credentials
-- Replace it with a real Firebase config only if your private deployment needs Firebase Cloud Messaging
-- **Important**: Make sure the package name in Firebase is set to `com.vernu.sms.selfhosted`
+- `SafeFirebase` disables Firebase for this flavor and its manifest removes `FirebaseInitProvider`; replacing the placeholder alone does not enable push.
+- Sending uses the owner API's pending-SMS polling transport, with the same `SmsSendWorker` pacing, SIM selection and persistent deduplication used by v2.9 push/recovery. Keep background notification enabled for polling; existing preferences are retained on upgrade.
+- Both API clients send `X-Textbee-Transport: poll` only in the selfhosted flavor, so authenticated heartbeats can select polling even if the device retains a historical FCM token. Prod/dev omit this hint and retain their push transport.
 
 ### 2. API Configuration
 
@@ -89,6 +90,31 @@ dev {
 # Build selfhosted release
 ./gradlew assembleSelfhostedRelease
 ```
+
+### Owner release signing
+
+Release signing is separate from `signingConfigs.debug`. Supply all four local
+environment variables (or their Gradle project-property equivalents); without
+them the release APK is unsigned:
+
+| Environment variable | Gradle property |
+| --- | --- |
+| `TEXTBEE_RELEASE_STORE_FILE` | `textbeeReleaseStoreFile` |
+| `TEXTBEE_RELEASE_STORE_PASSWORD` | `textbeeReleaseStorePassword` |
+| `TEXTBEE_RELEASE_KEY_ALIAS` | `textbeeReleaseKeyAlias` |
+| `TEXTBEE_RELEASE_KEY_PASSWORD` | `textbeeReleaseKeyPassword` |
+
+Use the existing owner's keystore. Never generate a replacement key for an
+upgrade or commit these values. A certificate whose subject says Android Debug
+can still be the established owner's identity: compare fingerprints, rather
+than judging the subject or Gradle configuration name. The verified public
+2.8.1 and staged 2.8.2 owner APKs share SHA-256 certificate
+`854906c854ca0d061cf48bcdc210a87768258c76f004f1550747aafe6199cbea`.
+This identifies those artifacts; it does not prove the phone's installed signer.
+
+The selfhosted 2.9.0 build uses code 21 because the staged 2.8.2 artifact already
+uses code 20. It retains package `com.vernu.sms.selfhosted`, existing `PREF`
+storage and the owner Hostinger endpoint until a coordinated endpoint migration.
 
 ## Installation
 

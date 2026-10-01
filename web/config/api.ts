@@ -28,10 +28,14 @@ export const ApiEndpoints = {
   gateway: {
     listDevices: () => '/gateway/devices',
     deleteDevice: (id: string) => `/gateway/devices/${id}`,
-    sendSMS: (id: string) => `/gateway/devices/${id}/send-sms`,
-    sendBulkSMS: (id: string) => `/gateway/devices/${id}/send-bulk-sms`,
-    getReceivedSMS: (id: string) => `/gateway/devices/${id}/get-received-sms`,
-    getMessages: (id: string) => `/gateway/devices/${id}/messages`,
+    setDefaultDevice: (id: string) => `/gateway/devices/${id}/set-default`,
+    // Device-agnostic: the id now travels in the body, optionally, and the API
+    // falls back to the account's default device when it is absent.
+    sendSMS: () => '/gateway/send-sms',
+    sendBulkSMS: () => '/gateway/send-bulk-sms',
+    // Account-level: device selection travels as a deviceIds query param,
+    // absent means every live device on the account.
+    getMessages: () => '/gateway/messages',
 
     getWebhooks: () => '/webhooks',
     getWebhookNotifications: () => '/webhooks/notifications',
@@ -43,6 +47,7 @@ export const ApiEndpoints = {
   billing: {
     currentSubscription: () => '/billing/current-subscription',
     checkout: () => '/billing/checkout',
+    changePlan: () => '/billing/change-plan',
     plans: () => '/billing/plans',
   },
   support: {

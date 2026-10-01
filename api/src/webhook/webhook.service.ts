@@ -18,7 +18,24 @@ import mongoose from 'mongoose'
 import { SMS } from '../gateway/schemas/sms.schema'
 import { WebhookQueueService } from './queue/webhook-queue.service'
 import { MailService } from '../mail/mail.service'
+import { firstName } from '../mail/first-name'
 import { UsersService } from '../users/users.service'
+
+/**
+ * Endpoints can carry a token in the query or in userinfo, so the admin summary
+ * only ever shows origin and path.
+ */
+export const redactDeliveryUrl = (deliveryUrl: string): string => {
+  if (!deliveryUrl) {
+    return ''
+  }
+  try {
+    const url = new URL(deliveryUrl)
+    return `${url.protocol}//${url.host}${url.pathname}`
+  } catch {
+    return '[unparseable url]'
+  }
+}
 
 @Injectable()
 export class WebhookService {
@@ -217,6 +234,13 @@ export class WebhookService {
     }
 
     if (deviceId) {
+      if (!mongoose.Types.ObjectId.isValid(deviceId)) {
+        throw new HttpException(
+          'Invalid deviceId',
+          HttpStatus.BAD_REQUEST,
+        )
+      }
+
       commonPipeline.push({
         $match: {
           'deviceData._id': new mongoose.Types.ObjectId(deviceId),
@@ -923,7 +947,7 @@ export class WebhookService {
       deletedAt: null,
     })
 
-    const ctaUrlBase = process.env.FRONTEND_URL || 'https://app.textbee.dev'
+    const ctaUrlBase = process.env.FRONTEND_URL || 'https://textbee-cloud.vercel.app'
     const disabledInThisRun: {
       subscriptionId: string
       deliveryUrl: string
@@ -995,8 +1019,10 @@ export class WebhookService {
           subject: 'Your webhook was paused – textbee',
           template: 'webhook-subscription-disabled',
           context: {
-            name: user.name?.split(' ')?.[0] || 'there',
+            name: firstName(user.name),
             title: 'Your webhook was paused',
+            subscriptionName: subscription.name ?? '',
+            deliveryUrl: subscription.deliveryUrl ?? '',
             failureCount,
             successCount,
             totalAttempts,
@@ -1004,7 +1030,6 @@ export class WebhookService {
             lookbackDays,
             ctaUrl: `${ctaUrlBase}/dashboard/account`,
             ctaLabel: 'Re-enable in dashboard',
-            brandName: 'textbee.dev',
           },
         })
       } catch (e) {
@@ -1027,8 +1052,13 @@ export class WebhookService {
             title: 'Webhook auto-disable summary',
             runAt,
             count: disabledInThisRun.length,
-            disabledList: disabledInThisRun,
-            brandName: 'textbee.dev',
+            rows: disabledInThisRun.map((d) => ({
+              id: d.subscriptionId,
+              deliveryUrl: redactDeliveryUrl(d.deliveryUrl),
+              failed: d.failureCount,
+              total: d.totalAttempts,
+              failureRate: d.failureRatePercent,
+            })),
           },
         })
       } catch (e) {

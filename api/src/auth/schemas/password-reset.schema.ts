@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
-import { Document, Types } from 'mongoose'
+import { Document, SchemaTypes, Types } from 'mongoose'
 import { User } from '../../users/schemas/user.schema'
 
 export type PasswordResetDocument = PasswordReset & Document
@@ -8,7 +8,7 @@ export type PasswordResetDocument = PasswordReset & Document
 export class PasswordReset {
   _id?: Types.ObjectId
 
-  @Prop({ type: Types.ObjectId, ref: User.name })
+  @Prop({ type: SchemaTypes.ObjectId, ref: User.name })
   user: User | Types.ObjectId
 
   @Prop({ type: String })
@@ -16,6 +16,10 @@ export class PasswordReset {
 
   @Prop({ type: Date })
   expiresAt: Date
+
+  // OTP verification attempts, used to lock the record out of brute-forcing.
+  @Prop({ type: Number, default: 0 })
+  attempts: number
 }
 
 export const PasswordResetSchema = SchemaFactory.createForClass(PasswordReset)

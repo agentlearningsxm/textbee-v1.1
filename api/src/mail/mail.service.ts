@@ -1,8 +1,36 @@
 import { ISendMailOptions, MailerService } from '@nest-modules/mailer'
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
+
+// Context every template gets via the shared email-layout partial.
+const layoutContext = () => ({
+  brandName: 'textbee.dev',
+  year: new Date().getFullYear(),
+})
+
+/** One bare address, so a display name cannot leak through the mask. */
+const BARE_ADDRESS = /^[^\s<>@,"]+@[^\s<>@,"]+$/
+
+/** Keeps recipient addresses out of the logs while staying traceable. */
+const redactRecipient = (to: ISendMailOptions['to']): string => {
+  if (Array.isArray(to)) {
+    return to.length === 1 ? redactRecipient(to[0]) : 'redacted'
+  }
+  const address = typeof to === 'string' ? to : to?.address
+  if (!address) {
+    return 'unknown recipient'
+  }
+  const trimmed = address.trim()
+  if (!BARE_ADDRESS.test(trimmed)) {
+    return 'redacted'
+  }
+  const [local, domain] = trimmed.split('@')
+  return `${local.slice(0, 2)}***@${domain}`
+}
 
 @Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name)
+
   constructor(private readonly mailerService: MailerService) {}
 
   async sendEmail({ to, subject, html, from }) {
@@ -22,7 +50,9 @@ export class MailService {
     try {
       await this.mailerService.sendMail(sendMailOptions)
     } catch (e) {
-      console.log(e)
+      this.logger.error(
+        `Failed to send email to ${redactRecipient(to)}: ${e?.message}`,
+      )
     }
   }
 
@@ -32,7 +62,7 @@ export class MailService {
       cc,
       subject,
       template,
-      context,
+      context: { ...context, ...layoutContext() },
     }
 
     if (from) {
@@ -46,7 +76,9 @@ export class MailService {
     try {
       await this.mailerService.sendMail(sendMailOptions)
     } catch (e) {
-      console.log(e)
+      this.logger.error(
+        `Failed to send "${template}" email to ${redactRecipient(to)}: ${e?.message}`,
+      )
     }
   }
 }

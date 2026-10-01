@@ -6,9 +6,17 @@ import * as firebaseAdmin from 'firebase-admin'
 import { Device } from '../schemas/device.schema'
 import { SMS } from '../schemas/sms.schema'
 import { SMSBatch } from '../schemas/sms-batch.schema'
+import { UsersService } from '../../users/users.service'
 import { WebhookService } from 'src/webhook/webhook.service'
 import { WebhookEvent } from 'src/webhook/webhook-event.enum'
 import { Logger } from '@nestjs/common'
+import {
+  FCM_SEND_SKIPPED_ERROR_CODE,
+  shouldSkipFcmSend,
+  skippedBatchResponse,
+} from '../fcm-send-skip'
+import { errorHistoryPush } from '../error-history'
+import { claimFcmMessages } from '../fcm-dispatch'
 
 function getFcmErrorCode(error: { code?: string; message?: string } | null): string {
   if (!error?.code) return 'FCM_DELIVERY_FAILED'
@@ -36,7 +44,24 @@ const FCM_ACTIONABLE_MESSAGE =
 
 function getFcmErrorMessage(error: { code?: string; message?: string } | null | undefined): string {
   const rawPart = `FCM_DELIVERY_FAILED: ${error?.message || 'FCM delivery failed'}`
-  return `${rawPart} — ${FCM_ACTIONABLE_MESSAGE}`
+  return `${rawPart}. ${FCM_ACTIONABLE_MESSAGE}`
+}
+
+// A paced batch is still 'processing' until every wave has been handed to FCM
+export function resolveBatchStatus(batch: {
+  recipientCount: number
+  successCount: number
+  failureCount: number
+  status?: string
+}): 'processing' | 'completed' | 'partial_success' | 'failed' | 'unknown' {
+  if (batch.status === 'unknown') return 'unknown'
+  const attempted = batch.successCount + batch.failureCount
+  if (attempted < batch.recipientCount) {
+    return 'processing'
+  }
+  if (batch.failureCount === 0) return 'completed'
+  if (batch.successCount === 0) return 'failed'
+  return 'partial_success'
 }
 
 @Processor('sms')
@@ -48,6 +73,7 @@ export class SmsQueueProcessor {
     @InjectModel(SMS.name) private smsModel: Model<SMS>,
     @InjectModel(SMSBatch.name) private smsBatchModel: Model<SMSBatch>,
     private webhookService: WebhookService,
+    private usersService: UsersService,
   ) {}
 
   @Process({
@@ -56,7 +82,10 @@ export class SmsQueueProcessor {
   })
   async handleSendSms(job: Job<any>) {
     // this.logger.debug(`Processing send-sms job ${job.id}`)
-    const { deviceId, fcmMessages, smsBatchId } = job.data
+    const { deviceId, smsBatchId } = job.data
+    let fcmMessages = job.data.fcmMessages
+    let pushHandedOff = false
+    let pushAttempted = false
 
     const device = await this.deviceModel
       .findById(deviceId)
@@ -67,22 +96,21 @@ export class SmsQueueProcessor {
         `Device or user not found for deviceId ${deviceId}, webhooks will be skipped`,
       )
     }
+    // Work enqueued before a legacy phone selected polling stays available to
+    // that phone. Its historical token must not reactivate a second transport.
+    if (device?.smsTransport === 'poll') return { polling: true }
 
     try {
-      this.smsBatchModel
-        .findByIdAndUpdate(smsBatchId, {
-          $set: { status: 'processing' },
-        })
-        .exec()
-        .catch((error) => {
-          this.logger.error(
-            `Failed to update sms batch status to processing ${smsBatchId}`,
-            error,
-          )
-          throw error
-        })
-
-      const response = await firebaseAdmin.messaging().sendEach(fcmMessages)
+      const skipped = shouldSkipFcmSend(device?.user, deviceId)
+      fcmMessages = await claimFcmMessages(this.smsModel, fcmMessages)
+      if (!fcmMessages.length) return { alreadyClaimed: true }
+      pushAttempted = true
+      const response = skipped
+        ? skippedBatchResponse(fcmMessages.length)
+        : await firebaseAdmin.messaging().sendEach(fcmMessages)
+      // The push is done. Anything that throws from here on is a persistence
+      // problem, and must not mark handed-off messages as failed a second time.
+      pushHandedOff = true
 
       // this.logger.debug(
       //   `SMS Job ${job.id}( smsBatchId: ${smsBatchId}) completed, success: ${response.successCount}, failures: ${response.failureCount}`,
@@ -118,11 +146,24 @@ export class SmsQueueProcessor {
       // Mark individual SMS records as dispatched when FCM push succeeded
       const now = new Date()
       const dispatchedSmsIds: string[] = []
+      const dispatchedUpdates: Array<{
+        smsId: string
+        fcmMessageId?: string
+      }> = []
       for (let i = 0; i < response.responses.length; i++) {
         if (response.responses[i].success) {
           try {
             const smsData = JSON.parse(fcmMessages[i].data.smsData)
+            const messageId = response.responses[i].messageId
             dispatchedSmsIds.push(String(smsData.smsId))
+            dispatchedUpdates.push({
+              smsId: String(smsData.smsId),
+              // The skip path fakes a response, so its sentinel is not an id
+              ...(messageId &&
+                messageId !== FCM_SEND_SKIPPED_ERROR_CODE && {
+                  fcmMessageId: messageId,
+                }),
+            })
           } catch (parseError) {
             this.logger.error(
               `Failed to mark SMS as dispatched for FCM message index ${i}`,
@@ -132,30 +173,50 @@ export class SmsQueueProcessor {
         }
       }
 
-      if (failedUpdates.length > 0) {
-        const failedAt = new Date()
-        for (const failedUpdate of failedUpdates) {
-          await this.smsModel.updateOne(
-            { _id: failedUpdate.smsId as any },
-            {
+      // One write per message: each row carries its own FCM message id and
+      // its own failure entry
+      const failedAt = new Date()
+      const writes = [
+        ...failedUpdates.map((failedUpdate) => ({
+          updateOne: {
+            filter: { _id: failedUpdate.smsId as any, status: 'dispatched' },
+            update: {
               $set: {
                 status: 'failed',
                 failedAt,
                 errorCode: failedUpdate.errorCode,
                 errorMessage: failedUpdate.errorMessage,
               },
+              ...(errorHistoryPush(
+                {
+                  code: failedUpdate.errorCode,
+                  message: failedUpdate.errorMessage,
+                  source: 'fcm',
+                },
+                failedAt,
+              ) ?? {}),
             },
-          )
-        }
-      }
-
-      if (dispatchedSmsIds.length > 0) {
-        await this.smsModel.updateMany(
-          { _id: { $in: dispatchedSmsIds } as any },
-          {
-            $set: { status: 'dispatched', dispatchedAt: now },
           },
-        )
+        })),
+        ...dispatchedUpdates.map((dispatchedUpdate) => ({
+          updateOne: {
+            filter: { _id: dispatchedUpdate.smsId as any, status: 'dispatched' },
+            update: {
+              $set: {
+                status: 'dispatched',
+                dispatchedAt: now,
+                ...(skipped && { errorCode: FCM_SEND_SKIPPED_ERROR_CODE }),
+                ...(dispatchedUpdate.fcmMessageId && {
+                  'metadata.fcmMessageId': dispatchedUpdate.fcmMessageId,
+                }),
+              },
+            },
+          },
+        })),
+      ]
+
+      if (writes.length > 0) {
+        await this.smsModel.bulkWrite(writes as any, { ordered: false })
       }
 
       if (device?.user && failedSmsIds.length > 0) {
@@ -185,6 +246,14 @@ export class SmsQueueProcessor {
         })
         .exec()
 
+      // device was loaded before the increment, so zero means this job carried
+      // the account's first message.
+      if (device?.user && device.sentSMSCount === 0 && response.successCount > 0) {
+        this.usersService
+          .markMilestone((device.user as any)?._id ?? device.user, 'firstSmsAt')
+          .catch(() => undefined)
+      }
+
       // Update batch status
       const smsBatch = await this.smsBatchModel.findByIdAndUpdate(
         smsBatchId,
@@ -197,91 +266,29 @@ export class SmsQueueProcessor {
         { returnDocument: 'after' },
       )
 
-      const batchStatus =
-        smsBatch.failureCount === smsBatch.recipientCount
-          ? 'failed'
-          : smsBatch.successCount === smsBatch.recipientCount
-            ? 'completed'
-            : 'partial_success'
-      await this.smsBatchModel.findByIdAndUpdate(smsBatchId, {
-        $set: { status: batchStatus },
-      })
+      // The batch may have been deleted mid-flight
+      if (smsBatch) {
+        await this.smsBatchModel.findByIdAndUpdate(smsBatchId, {
+          $set: { status: resolveBatchStatus(smsBatch) },
+        })
+      }
 
       return response
     } catch (error) {
       this.logger.error(`Failed to process SMS job ${job.id}`, error)
 
-      // Mark all individual SMS in this batch of FCM messages as failed
-      const failedSmsIds: string[] = []
-      for (const fcmMessage of fcmMessages) {
-        try {
-          const smsData = JSON.parse(fcmMessage.data.smsData)
-          failedSmsIds.push(String(smsData.smsId))
-        } catch (parseError) {
-          this.logger.error(
-            'Failed to mark SMS as failed after FCM error',
-            parseError,
-          )
-        }
-      }
-
-      if (failedSmsIds.length > 0) {
-        const failedAt = new Date()
-        await this.smsModel.updateMany(
-          { _id: { $in: failedSmsIds } as any },
-          {
-            $set: {
-              status: 'failed',
-              failedAt,
-              errorCode:
-                (error as any)?.code != null
-                  ? getFcmErrorCode(error as any)
-                  : 'FCM_SEND_ERROR',
-              errorMessage: getFcmErrorMessage(error as any),
-            },
-          },
-        )
-      }
-
-      if (device?.user && failedSmsIds.length > 0) {
-        const failedSmsDocuments = await this.smsModel.find({
-          _id: { $in: failedSmsIds },
-        })
-        for (const failedSms of failedSmsDocuments) {
-          await this.webhookService
-            .deliverNotification({
-              sms: failedSms,
-              user: device.user as any,
-              event: WebhookEvent.MESSAGE_FAILED,
-            })
-            .catch((e) =>
-              this.logger.warn(
-                `Webhook delivery failed for SMS ${failedSms._id}`,
-                e?.message,
-              ),
-            )
-        }
-      }
-
-      const smsBatch = await this.smsBatchModel.findByIdAndUpdate(
-        smsBatchId,
-        {
-          $inc: {
-            failureCount: fcmMessages.length,
-          },
-        },
-        { returnDocument: 'after' },
+      // A sendEach exception cannot prove rejection. Only claimed messages
+      // belong to this attempt; a claim failure must not touch another worker.
+      if (pushHandedOff || !pushAttempted) throw error
+      const ids = fcmMessages.map((message) => String(JSON.parse(message.data.smsData).smsId))
+      await this.smsModel.updateMany(
+        { _id: { $in: ids } as any, status: 'dispatched' },
+        { $set: { status: 'unknown', errorCode: 'FCM_OUTCOME_UNKNOWN' } },
       )
-
-      const newStatus =
-        smsBatch.failureCount === smsBatch.recipientCount
-          ? 'failed'
-          : 'partial_success'
-
       await this.smsBatchModel.findByIdAndUpdate(smsBatchId, {
-        $set: { status: newStatus },
+        $set: { status: 'unknown', error: 'Push outcome unknown. Check message status before retrying.' },
+        $inc: { 'metadata.unknownCount': ids.length },
       })
-
       throw error
     }
   }

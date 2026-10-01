@@ -15,9 +15,11 @@ import com.google.gson.Gson
 import com.vernu.sms.ApiManager
 import com.vernu.sms.AppConstants
 import com.vernu.sms.R
+import com.vernu.sms.TextbeeUtils
 import com.vernu.sms.activities.MainActivity
 import com.vernu.sms.dtos.RegisterDeviceInputDTO
 import com.vernu.sms.dtos.RegisterDeviceResponseDTO
+import com.vernu.sms.helpers.DeviceLog
 import com.vernu.sms.helpers.HeartbeatHelper
 import com.vernu.sms.helpers.HeartbeatManager
 import com.vernu.sms.helpers.SharedPreferenceHelper
@@ -35,10 +37,12 @@ class FCMService : FirebaseMessagingService() {
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         Log.d(TAG, remoteMessage.data.toString())
+        val pushReceivedAt = System.currentTimeMillis()
 
         try {
             val messageType = remoteMessage.data["type"]
             if (messageType == "heartbeat_check") {
+                DeviceLog.log(this, "push_received", "heartbeat check")
                 handleHeartbeatCheck()
                 return
             }
@@ -46,10 +50,10 @@ class FCMService : FirebaseMessagingService() {
             val smsPayload = Gson().fromJson(remoteMessage.data["smsData"], SMSPayload::class.java)
 
             if (remoteMessage.data.isNotEmpty()) {
-                sendSMS(smsPayload)
+                sendSMS(smsPayload, pushReceivedAt)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing FCM message: ${e.message}")
+            TextbeeUtils.logException(e, "Error processing FCM message")
         }
     }
 
@@ -77,7 +81,7 @@ class FCMService : FirebaseMessagingService() {
         HeartbeatManager.scheduleHeartbeat(this)
     }
 
-    private fun sendSMS(smsPayload: SMSPayload?) {
+    private fun sendSMS(smsPayload: SMSPayload?, pushReceivedAt: Long) {
         if (smsPayload == null) {
             Log.e(TAG, "SMS payload is null")
             return
@@ -88,11 +92,18 @@ class FCMService : FirebaseMessagingService() {
             Log.e(TAG, "No recipients found in SMS payload")
             return
         }
+        if (smsPayload.smsId.isNullOrEmpty() || smsPayload.message == null) {
+            Log.e(TAG, "SMS payload is missing its id or message")
+            DeviceLog.log(this, "push_invalid", "missing id or message")
+            return
+        }
+        DeviceLog.log(this, "push_received", "${recipients.size} recipient(s)", smsPayload.smsId)
 
         for (recipient in recipients) {
             SmsSendWorker.enqueue(
                 this, recipient, smsPayload.message ?: "",
-                smsPayload.smsId, smsPayload.smsBatchId, smsPayload.simSubscriptionId
+                smsPayload.smsId, smsPayload.smsBatchId, smsPayload.simSubscriptionId,
+                pushReceivedAt
             )
         }
 
@@ -100,6 +111,7 @@ class FCMService : FirebaseMessagingService() {
     }
 
     override fun onNewToken(token: String) {
+        DeviceLog.log(this, "token_refreshed")
         sendRegistrationToServer(token)
     }
 

@@ -1,12 +1,20 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { User, UserDocument } from './schemas/user.schema'
-import { Model } from 'mongoose'
+import { Model, Types } from 'mongoose'
 import { UpdateOnboardingDTO } from '../auth/auth.dto'
 import {
   ONBOARDING_OPTIONAL_STEP_IDS,
   ONBOARDING_STEP_ORDER,
 } from './onboarding.constants'
+import { AttributionInput, normalizeSignupSource } from './attribution'
+import { classifyDevice, describeClient } from '../common/user-agent'
+
+export type UserMilestoneField =
+  | 'firstDeviceAt'
+  | 'firstApiKeyAt'
+  | 'firstSmsAt'
+  | 'firstPaidAt'
 
 @Injectable()
 export class UsersService {
@@ -16,6 +24,11 @@ export class UsersService {
 
   async findOne(params) {
     return await this.userModel.findOne(params)
+  }
+
+  // Only for flows that verify a password. Never return this to a client.
+  async findOneWithPassword(params) {
+    return await this.userModel.findOne(params).select('+password')
   }
 
   async findAll() {
@@ -29,6 +42,10 @@ export class UsersService {
     phone,
     emailVerifiedAt,
     isApproved,
+    marketingOptIn,
+    attribution,
+    userAgent,
+    country,
   }: {
     name: string
     email: string
@@ -38,6 +55,10 @@ export class UsersService {
     // Explicit, trusted-caller-only flag. Never derived from a request body spread,
     // so it cannot be mass-assigned to escalate access.
     isApproved?: boolean
+    marketingOptIn?: boolean
+    attribution?: AttributionInput
+    userAgent?: string
+    country?: string
   }) {
     if (await this.findOne({ email })) {
       throw new HttpException(
@@ -48,6 +69,7 @@ export class UsersService {
       )
     }
 
+    const client = describeClient(userAgent)
     const newUser = new this.userModel({
       name,
       email,
@@ -55,8 +77,37 @@ export class UsersService {
       phone,
       emailVerifiedAt: emailVerifiedAt || null,
       isApproved: isApproved === true,
+      marketingOptIn: marketingOptIn ?? false,
+      attribution,
+      signupSource: normalizeSignupSource(attribution),
+      signupDevice: classifyDevice(userAgent),
+      signupCountry: country,
+      ...(client && { client: { signup: client, last: client } }),
     })
     return await newUser.save()
+  }
+
+  /**
+   * Stamps a milestone the first time it happens and never again. The
+   * $exists filter does that in one write, so callers can fire a conversion
+   * event on the returned true without reading the user first, and a repeated
+   * call (every app launch re-registers a device) is a no-op.
+   */
+  async markMilestone(
+    userId: string | Types.ObjectId,
+    field: UserMilestoneField,
+  ): Promise<boolean> {
+    const path = `milestones.${field}`
+    const result = await this.userModel.updateOne(
+      { _id: userId, [path]: { $exists: false } },
+      { $set: { [path]: new Date() } },
+    )
+    return result.modifiedCount === 1
+  }
+
+  touchClient(user: UserDocument, userAgent?: string): void {
+    const client = describeClient(userAgent)
+    if (client) user.set('client.last', client)
   }
 
   async updateProfile(

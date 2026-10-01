@@ -8,6 +8,7 @@ import android.telephony.SmsManager
 import android.util.Log
 import com.vernu.sms.AppConstants
 import com.vernu.sms.dtos.SMSDTO
+import com.vernu.sms.helpers.DeviceLog
 import com.vernu.sms.helpers.SharedPreferenceHelper
 import com.vernu.sms.workers.SMSStatusUpdateWorker
 import java.lang.reflect.Modifier
@@ -17,6 +18,8 @@ class SMSStatusReceiver : BroadcastReceiver() {
         private const val TAG = "SMSStatusReceiver"
         const val SMS_SENT = "SMS_SENT"
         const val SMS_DELIVERED = "SMS_DELIVERED"
+        const val EXTRA_PUSH_RECEIVED_AT = "push_received_at"
+        const val EXTRA_SEND_ATTEMPTED_AT = "send_attempted_at"
 
         private fun getResultCodeName(resultCode: Int): String? {
             for (clazz in arrayOf<Class<*>>(SmsManager::class.java, Activity::class.java)) {
@@ -43,6 +46,9 @@ class SMSStatusReceiver : BroadcastReceiver() {
         val smsDTO = SMSDTO().apply {
             this.smsId = smsId
             this.smsBatchId = smsBatchId
+            // Carried through the pending intent from the send worker
+            pushReceivedAtInMillis = intent.getLongExtra(EXTRA_PUSH_RECEIVED_AT, 0)
+            sendAttemptedAtInMillis = intent.getLongExtra(EXTRA_SEND_ATTEMPTED_AT, 0)
         }
 
         when (intent.action) {
@@ -123,6 +129,7 @@ class SMSStatusReceiver : BroadcastReceiver() {
     }
 
     private fun updateSMSStatus(context: Context, smsDTO: SMSDTO) {
+        DeviceLog.log(context, "status_${smsDTO.status?.lowercase() ?: "unknown"}", smsDTO.errorMessage ?: "", smsDTO.smsId)
         val deviceId = SharedPreferenceHelper.getSharedPreferenceString(
             context, AppConstants.SHARED_PREFS_DEVICE_ID_KEY, ""
         ) ?: ""

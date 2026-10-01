@@ -1,11 +1,18 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common'
 import { UsersService } from '../users/users.service'
+import { sanitizeAttribution } from '../users/attribution'
+import { AnalyticsService } from '../analytics/analytics.service'
 import { JwtService } from '@nestjs/jwt'
 import * as bcrypt from 'bcryptjs'
+import { createHash, randomInt } from 'crypto'
 import { v4 as uuidv4 } from 'uuid'
 import { InjectModel } from '@nestjs/mongoose'
 import { ApiKey, ApiKeyDocument } from './schemas/api-key.schema'
-import { Model } from 'mongoose'
+import {
+  ApiKeyTombstone,
+  ApiKeyTombstoneDocument,
+} from './schemas/api-key-tombstone.schema'
+import { Model, Types } from 'mongoose'
 import { User, UserDocument } from '../users/schemas/user.schema'
 import { UserRole } from '../users/user-roles.enum'
 import axios from 'axios'
@@ -14,14 +21,30 @@ import {
   PasswordResetDocument,
 } from './schemas/password-reset.schema'
 import { MailService } from '../mail/mail.service'
+import { firstName } from '../mail/first-name'
 import { TurnstileService } from '../common/turnstile.service'
+import { escapeRegExp } from '../common/escape-regexp'
 import { RequestResetPasswordInputDTO, ResetPasswordInputDTO } from './auth.dto'
-import { AccessLog } from './schemas/access-log.schema'
+import { AccessFootprintService } from './access-footprint.service'
 import {
   EmailVerification,
   EmailVerificationDocument,
 } from './schemas/email-verification.schema'
 import { InvitesService } from '../invites/invites.service'
+
+// Failed OTP submissions allowed against a single password reset record.
+const MAX_PASSWORD_RESET_ATTEMPTS = 5
+
+export const API_KEY_PREFIX = 'txb_'
+const API_KEY_BODY_LENGTH = 32
+const API_KEY_BODY_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+
+// For register and login, which hold the hash in memory before responding.
+export const withoutPassword = (user: UserDocument) => {
+  const { password, ...safe } = user.toObject()
+  return safe
+}
 
 @Injectable()
 export class AuthService {
@@ -29,20 +52,28 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     @InjectModel(ApiKey.name) private apiKeyModel: Model<ApiKeyDocument>,
+    @InjectModel(ApiKeyTombstone.name)
+    private apiKeyTombstoneModel: Model<ApiKeyTombstoneDocument>,
     @InjectModel(PasswordReset.name)
     private passwordResetModel: Model<PasswordResetDocument>,
-    @InjectModel(AccessLog.name) private accessLogModel: Model<AccessLog>,
+    private accessFootprintService: AccessFootprintService,
     @InjectModel(EmailVerification.name)
     private emailVerificationModel: Model<EmailVerificationDocument>,
     private readonly mailService: MailService,
     private readonly turnstileService: TurnstileService,
     private readonly invitesService: InvitesService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
 
-  async login(userData: any) {
+  async login(
+    userData: any,
+    requestContext?: { ip?: string; userAgent?: string; country?: string },
+  ) {
     await this.turnstileService.verify(userData.turnstileToken)
 
-    const user = await this.usersService.findOne({ email: userData.email })
+    const user = await this.usersService.findOneWithPassword({
+      email: userData.email,
+    })
     if (!user) {
       throw new HttpException(
         { error: 'Invalid credentials' },
@@ -68,12 +99,13 @@ export class AuthService {
     this.assertApproved(user)
 
     user.lastLoginAt = new Date()
+    this.usersService.touchClient(user, requestContext?.userAgent)
     await user.save()
 
     const payload = { email: user.email, sub: user._id }
     return {
       accessToken: this.jwtService.sign(payload),
-      user,
+      user: withoutPassword(user),
     }
   }
 
@@ -81,7 +113,13 @@ export class AuthService {
    * Admin-gated access: only accounts an admin created/approved/invited (isApproved),
    * or admins themselves, may sign in. Applies to every login path.
    */
-  private assertApproved(user: UserDocument) {
+  assertApproved(user: UserDocument) {
+    if (user.isBanned) {
+      throw new HttpException(
+        { error: 'Your account has been suspended. Please contact support for assistance.' },
+        HttpStatus.FORBIDDEN,
+      )
+    }
     if (user.role === UserRole.ADMIN || user.isApproved) {
       return
     }
@@ -94,14 +132,62 @@ export class AuthService {
     )
   }
 
-  async loginWithGoogle(idToken: string) {
+  // tokeninfo only proves Google signed the token, not that it was issued for
+  // this app, so the audience and the verified-email flag are checked here.
+  private assertGoogleTokenIsForThisApp(tokenInfo: {
+    aud?: string
+    email_verified?: boolean | string
+  }) {
+    const allowedAudiences = (process.env.GOOGLE_CLIENT_ID ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+
+    if (!allowedAudiences.length) {
+      // Unset in this environment: log rather than reject, so a missing config
+      // value cannot take Google sign-in down. Set GOOGLE_CLIENT_ID to enable.
+      console.error(
+        'loginWithGoogle: GOOGLE_CLIENT_ID is not set, skipping audience check',
+      )
+    } else if (!allowedAudiences.includes(tokenInfo.aud)) {
+      throw new HttpException(
+        { error: 'Unauthorized' },
+        HttpStatus.UNAUTHORIZED,
+      )
+    }
+
+    if (
+      tokenInfo.email_verified !== true &&
+      tokenInfo.email_verified !== 'true'
+    ) {
+      throw new HttpException(
+        { error: 'Google account email is not verified' },
+        HttpStatus.UNAUTHORIZED,
+      )
+    }
+  }
+
+  async loginWithGoogle(
+    idToken: string,
+    signupContext?: {
+      attribution?: unknown
+      ip?: string
+      userAgent?: string
+      country?: string
+    },
+  ) {
     const response = await axios.get(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`,
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(
+        idToken,
+      )}`,
     )
+
+    this.assertGoogleTokenIsForThisApp(response.data)
 
     const { sub: googleId, name, email, picture } = response.data
     const user = await this.usersService.findOne({ email })
 
+    const isNewUser = false
     // Admin-gated: Google sign-in may NOT self-create an account. Access is granted
     // only through admin creation / approval / invite. Unknown Google users are refused.
     if (!user) {
@@ -141,16 +227,30 @@ export class AuthService {
     this.assertApproved(user)
 
     user.lastLoginAt = new Date()
+    if (!isNewUser) {
+      this.usersService.touchClient(user, signupContext?.userAgent)
+    }
     await user.save()
+
+    if (isNewUser) {
+      this.analyticsService.userRegistered(user as any, {
+        ip: signupContext?.ip,
+        userAgent: signupContext?.userAgent,
+      })
+    }
 
     const payload = { email: user.email, sub: user._id }
     return {
       accessToken: this.jwtService.sign(payload),
-      user,
+      user: withoutPassword(user),
+      isNewUser,
     }
   }
 
-  async register(userData: any) {
+  async register(
+    userData: any,
+    requestContext?: { ip?: string; userAgent?: string; country?: string },
+  ) {
     await this.turnstileService.verify(userData.turnstileToken)
 
     // Admin-gated access, fail-closed: a valid admin-issued invite code is ALWAYS
@@ -194,8 +294,8 @@ export class AuthService {
       )
     }
 
-    this.validateEmail(userData.email)
-    this.validatePassword(userData.password)
+    await this.validateEmail(userData.email)
+    await this.validatePassword(userData.password)
 
     const hashedPassword = await bcrypt.hash(userData.password, 10)
     // Pass only explicit, trusted fields — never spread the request body, so role /
@@ -205,6 +305,10 @@ export class AuthService {
       email: userData.email,
       phone: userData.phone,
       password: hashedPassword,
+      marketingOptIn: userData.marketingOptIn === true,
+      attribution: sanitizeAttribution(userData.attribution),
+      userAgent: requestContext?.userAgent,
+      country: requestContext?.country,
     })
 
     // Consume the invite code after successful user creation. A valid admin-issued
@@ -216,21 +320,18 @@ export class AuthService {
     user.lastLoginAt = new Date()
     await user.save()
 
-    setImmediate(() => {
-      this.mailService.sendEmailFromTemplate({
-        to: user.email,
-        subject: 'Welcome to TextBee - Lets get started!',
-        template: 'welcome-1',
-        context: { name: user.name },
-        from: 'vernu vernu@textbee.dev',
-      })
+    this.analyticsService.userRegistered(user as any, requestContext)
+
+    this.sendEmailVerificationEmail(user).catch((e) => {
+      console.log('Failed to send email verification email')
+      console.log(e)
     })
 
     const payload = { email: user.email, sub: user._id }
 
     return {
       accessToken: this.jwtService.sign(payload),
-      user,
+      user: withoutPassword(user),
     }
   }
 
@@ -240,28 +341,37 @@ export class AuthService {
   }: RequestResetPasswordInputDTO) {
     await this.turnstileService.verify(turnstileToken)
 
+    // Both branches below return this, so the response says nothing about
+    // whether the address is registered.
+    const acceptedResponse = {
+      message: 'If email is found you will receive a password reset email',
+    }
+
+    // Guards against a non-string reaching the query as a Mongo operator.
+    if (typeof email !== 'string') {
+      return acceptedResponse
+    }
+
     const user = await this.usersService.findOne({ email })
     if (!user) {
-      return {
-        message: 'If email is found you will receive a password reset email',
-      }
+      return acceptedResponse
     }
 
     // Check if user has requested password reset more than 5 times in the last 24 hours
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
     const resetCount = await this.passwordResetModel.countDocuments({
       user: user._id,
-      createdAt: { $gte: twentyFourHoursAgo }
+      createdAt: { $gte: twentyFourHoursAgo },
     })
 
     if (resetCount >= 5) {
       throw new HttpException(
         { error: 'Too many password reset requests. Please try again later.' },
-        HttpStatus.TOO_MANY_REQUESTS
+        HttpStatus.TOO_MANY_REQUESTS,
       )
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const otp = randomInt(100000, 1000000).toString()
     const expiresAt = new Date(Date.now() + 20 * 60 * 1000)
 
     const hashedOtp = await bcrypt.hash(otp, 10)
@@ -272,30 +382,61 @@ export class AuthService {
     })
     await passwordReset.save()
 
-    const resetLink = `${process.env.FRONTEND_URL || 'https://textbee.dev'}/reset-password?email=${encodeURIComponent(user.email)}&otp=${otp}`
+    const resetLink = `${process.env.FRONTEND_URL || 'https://textbee-cloud.vercel.app'}/reset-password?email=${encodeURIComponent(user.email)}&otp=${otp}`
 
     await this.mailService.sendEmailFromTemplate({
       to: user.email,
       subject: 'textbee.dev - Password Reset',
       template: 'password-reset-request',
-      context: { name: user.name, resetLink, otp },
+      context: { name: firstName(user.name), resetLink, otp },
     })
 
-    return { message: 'Password reset email sent' }
+    return acceptedResponse
   }
 
   async resetPassword({ email, otp, newPassword }: ResetPasswordInputDTO) {
+    // Matches the other failure paths below so an unknown address is not
+    // distinguishable from a bad code.
+    const invalidOtp = new HttpException(
+      { error: 'Invalid OTP' },
+      HttpStatus.BAD_REQUEST,
+    )
+
+    if (typeof email !== 'string') {
+      throw invalidOtp
+    }
+
     const user = await this.usersService.findOne({ email })
     if (!user) {
-      throw new HttpException({ error: 'User not found' }, HttpStatus.NOT_FOUND)
+      throw invalidOtp
     }
-    const passwordReset = await this.passwordResetModel.findOne(
+    const latestReset = await this.passwordResetModel.findOne(
       {
         user: user._id,
         expiresAt: { $gt: new Date() },
       },
       null,
       { sort: { createdAt: -1 } },
+    )
+
+    if (!latestReset) {
+      throw new HttpException({ error: 'Invalid OTP' }, HttpStatus.BAD_REQUEST)
+    }
+
+    // Claim an attempt atomically so concurrent guesses cannot all read the
+    // same count and slip past the cap. A null result means the record is
+    // already locked out and a fresh reset request is required.
+    const passwordReset = await this.passwordResetModel.findOneAndUpdate(
+      {
+        _id: latestReset._id,
+        // Records predating this counter have no attempts field at all.
+        $or: [
+          { attempts: { $lt: MAX_PASSWORD_RESET_ATTEMPTS } },
+          { attempts: { $exists: false } },
+        ],
+      },
+      { $inc: { attempts: 1 } },
+      { new: true },
     )
 
     if (!passwordReset || !(await bcrypt.compare(otp, passwordReset.otp))) {
@@ -309,13 +450,11 @@ export class AuthService {
     passwordReset.expiresAt = new Date(Date.now())
     await passwordReset.save()
 
-    setImmediate(() => {
-      this.mailService.sendEmailFromTemplate({
-        to: user.email,
-        subject: 'textbee.dev - Password Reset',
-        template: 'password-reset-success',
-        context: { name: user.name },
-      })
+    this.mailService.sendEmailFromTemplate({
+      to: user.email,
+      subject: 'textbee.dev - Password Reset',
+      template: 'password-reset-success',
+      context: { name: firstName(user.name) },
     })
 
     return { message: 'Password reset successfully' }
@@ -332,7 +471,9 @@ export class AuthService {
     input: { oldPassword: string; newPassword: string },
     user: UserDocument,
   ) {
-    const userToUpdate = await this.usersService.findOne({ _id: user._id })
+    const userToUpdate = await this.usersService.findOneWithPassword({
+      _id: user._id,
+    })
     if (!userToUpdate) {
       throw new HttpException({ error: 'User not found' }, HttpStatus.NOT_FOUND)
     }
@@ -343,7 +484,7 @@ export class AuthService {
       )
     }
 
-    this.validatePassword(input.newPassword)
+    await this.validatePassword(input.newPassword)
 
     const hashedPassword = await bcrypt.hash(input.newPassword, 10)
     userToUpdate.password = hashedPassword
@@ -355,13 +496,16 @@ export class AuthService {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
     const verificationCount = await this.emailVerificationModel.countDocuments({
       user: user._id,
-      createdAt: { $gte: twentyFourHoursAgo }
+      createdAt: { $gte: twentyFourHoursAgo },
     })
 
     if (verificationCount >= 5) {
       throw new HttpException(
-        { error: 'Too many email verification requests. Please try again later.' },
-        HttpStatus.TOO_MANY_REQUESTS
+        {
+          error:
+            'Too many email verification requests. Please try again later.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
       )
     }
 
@@ -377,14 +521,14 @@ export class AuthService {
     })
     await emailVerification.save()
 
-    const verificationLink = `${process.env.FRONTEND_URL || 'https://textbee.dev'}/verify-email?userId=${user._id}&verificationCode=${verificationCode}`
+    const verificationLink = `${process.env.FRONTEND_URL || 'https://textbee-cloud.vercel.app'}/verify-email?userId=${user._id}&verificationCode=${verificationCode}`
 
     await this.mailService.sendEmailFromTemplate({
       to: user.email,
       subject: 'textbee.dev - Verify Email',
       template: 'verify-email',
       context: {
-        name: user.name,
+        name: firstName(user.name),
         verificationLink,
       },
     })
@@ -425,25 +569,78 @@ export class AuthService {
     return { message: 'Email verified successfully' }
   }
 
+  private sha256(value: string): string {
+    return createHash('sha256').update(value).digest('hex')
+  }
+
+  private generateApiKeyString(): string {
+    let body = ''
+    for (let i = 0; i < API_KEY_BODY_LENGTH; i++) {
+      body += API_KEY_BODY_ALPHABET[randomInt(API_KEY_BODY_ALPHABET.length)]
+    }
+    return `${API_KEY_PREFIX}${body}`
+  }
+
   async generateApiKey(currentUser: User) {
-    const apiKey = uuidv4()
+    const apiKey = this.generateApiKeyString()
     const hashedApiKey = await bcrypt.hash(apiKey, 10)
 
     const newApiKey = new this.apiKeyModel({
       apiKey: apiKey.substr(0, 17) + '*'.repeat(18),
       hashedApiKey,
+      hashedApiKeySha256: this.sha256(apiKey),
       user: currentUser._id,
     })
 
     await newApiKey.save()
 
+    // Activation milestone. Fire and forget: a reporting write must not fail
+    // the call that just handed the caller a key they cannot see again.
+    this.usersService
+      .markMilestone(currentUser._id, 'firstApiKeyAt')
+      .catch(() => undefined)
+
     return { apiKey, message: 'Save this key, it wont be shown again ;)' }
   }
 
-  async getUserApiKeys(
-    currentUser: User,
-    statusParam?: string,
-  ) {
+  /**
+   * Resolves a presented key to its active ApiKey document, or null.
+   * Fast path is a single indexed sha256 lookup. Keys issued before the
+   * migration fall back to bcrypt once, then backfill themselves.
+   */
+  async verifyApiKey(apiKeyString: string): Promise<ApiKeyDocument | null> {
+    if (!apiKeyString || typeof apiKeyString !== 'string') {
+      return null
+    }
+
+    const hashedApiKeySha256 = this.sha256(apiKeyString)
+    const byHash = await this.apiKeyModel.findOne({ hashedApiKeySha256 })
+    if (byHash) {
+      // A hash match identifies the key outright, so a revoked hit is final.
+      return byHash.revokedAt ? null : byHash
+    }
+
+    const legacyApiKey = await this.findActiveApiKeyByClientKey(apiKeyString)
+    if (
+      !legacyApiKey?.hashedApiKey ||
+      legacyApiKey.revokedAt ||
+      !(await bcrypt.compare(apiKeyString, legacyApiKey.hashedApiKey))
+    ) {
+      return null
+    }
+
+    this.apiKeyModel
+      .updateOne({ _id: legacyApiKey._id }, { $set: { hashedApiKeySha256 } })
+      .exec()
+      .catch((e) => {
+        console.log('Failed to backfill api key sha256 hash')
+        console.log(e)
+      })
+
+    return legacyApiKey
+  }
+
+  async getUserApiKeys(currentUser: User, statusParam?: string) {
     const normalized =
       statusParam === undefined || statusParam === '' ? 'active' : statusParam
     if (!['active', 'revoked', 'all'].includes(normalized)) {
@@ -469,7 +666,8 @@ export class AuthService {
       }
     }
 
-    return this.apiKeyModel.find(filter, null, {
+    // Never ship credential digests to the client.
+    return this.apiKeyModel.find(filter, '-hashedApiKey -hashedApiKeySha256', {
       sort: { createdAt: -1 },
     })
   }
@@ -492,7 +690,7 @@ export class AuthService {
     if (byMasked) {
       return byMasked
     }
-    const regex = new RegExp(`^${prefix}`, 'g')
+    const regex = new RegExp(`^${escapeRegExp(prefix)}`, 'g')
     return this.apiKeyModel.findOne({
       apiKey: { $regex: regex },
       ...revokedClause,
@@ -504,7 +702,12 @@ export class AuthService {
   }
 
   async deleteApiKey(apiKeyId: string) {
-    const apiKey = await this.apiKeyModel.findOne({ _id: apiKeyId })
+    // Cast first: the id comes from the route, so it reaches the query as an
+    // ObjectId or not at all.
+    const id = Types.ObjectId.isValid(apiKeyId)
+      ? new Types.ObjectId(apiKeyId)
+      : null
+    const apiKey = id ? await this.apiKeyModel.findOne({ _id: id }).lean() : null
     if (!apiKey) {
       throw new HttpException(
         {
@@ -522,7 +725,32 @@ export class AuthService {
       )
     }
 
-    await this.apiKeyModel.deleteOne({ _id: apiKeyId })
+    const written = await this.apiKeyTombstoneModel.updateOne(
+      { apiKeyId: id },
+      {
+        $setOnInsert: {
+          apiKeyId: id,
+          userId: apiKey.user,
+          deletedAt: new Date(),
+          apiKey,
+        },
+      },
+      { upsert: true },
+    )
+
+    try {
+      await this.apiKeyModel.deleteOne({ _id: id })
+    } catch (error) {
+      // The record must not outlive a delete that did not happen, or the key
+      // reads as gone while it still exists. Only a record this call created
+      // is taken back, and only while the key is still there: an error raised
+      // after the delete landed leaves the record alone, since that is the
+      // only copy of the key left.
+      if (written.upsertedCount && (await this.apiKeyModel.exists({ _id: id }))) {
+        await this.apiKeyTombstoneModel.deleteOne({ apiKeyId: id })
+      }
+      throw error
+    }
   }
 
   async revokeApiKey(apiKeyId: string) {
@@ -549,11 +777,16 @@ export class AuthService {
     await apiKey.save()
   }
 
+  /**
+   * Runs on every authenticated request from the guards, never awaited.
+   *
+   * Two things are recorded: how much a key is used, and the distinct origins
+   * the account is reached from. Neither may fail a request.
+   */
   async trackAccessLog({ request }) {
-    const { apiKey, user, method, url, ip, headers } = request
-    const userAgent = headers['user-agent']
+    const { apiKey } = request
 
-    if (request.apiKey) {
+    if (apiKey) {
       this.apiKeyModel
         .findByIdAndUpdate(
           apiKey._id,
@@ -567,27 +800,19 @@ export class AuthService {
         })
     }
 
-    /* this.accessLogModel
-      .create({
-        apiKey,
-        user,
-        method,
-        url: url.split('?')[0],
-        ip:
-          request.headers['x-forwarded-for'] ||
-          request.connection.remoteAddress ||
-          ip,
-        userAgent,
-      })
-      .catch((e) => {
-        console.log('Failed to track access log')
-        console.log(e)
-      }) */
+    this.accessFootprintService.record({ request })
   }
 
   async validateEmail(email: string) {
-    const re = /\S+@\S+\.\S+/
-    if (!re.test(email)) {
+    // Anchored, with character classes that cannot overlap, and bounded by the
+    // RFC length limit. The previous pattern was unanchored \S+@\S+\.\S+,
+    // whose repeated \S+ groups backtrack polynomially on a long run of
+    // non-space characters. Registration is unauthenticated and accepts a large
+    // body, so that was reachable by anyone.
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const candidate = typeof email === 'string' ? email.trim() : ''
+
+    if (candidate.length > 254 || !re.test(candidate)) {
       throw new HttpException(
         { error: 'Invalid email' },
         HttpStatus.BAD_REQUEST,

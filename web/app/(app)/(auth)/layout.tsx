@@ -4,14 +4,14 @@ import { Cinzel, Cormorant_Garamond } from 'next/font/google'
 const cinzel = Cinzel({
   subsets: ['latin'],
   weight: ['400', '600', '700'],
-  variable: '--font-cinzel',
+  variable: '--font-cinzel-family',
   display: 'swap',
 })
 
 const cormorant = Cormorant_Garamond({
   subsets: ['latin'],
   weight: ['400', '500', '600'],
-  variable: '--font-cormorant',
+  variable: '--font-cormorant-family',
   display: 'swap',
 })
 

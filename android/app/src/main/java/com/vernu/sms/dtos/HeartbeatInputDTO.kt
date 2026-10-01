@@ -7,6 +7,8 @@ class HeartbeatInputDTO {
     var networkType: String? = null
     var appVersionName: String? = null
     var appVersionCode: Int? = null
+    var osVersion: String? = null
+    var osApiLevel: Int? = null
     var deviceUptimeMillis: Long? = null
     var memoryFreeBytes: Long? = null
     var memoryTotalBytes: Long? = null
@@ -17,5 +19,14 @@ class HeartbeatInputDTO {
     var locale: String? = null
     var receiveSMSEnabled: Boolean? = null
     var smsSendDelaySeconds: Int? = null
+    var isIgnoringBatteryOptimizations: Boolean? = null
+    var isDeviceIdleMode: Boolean? = null
+    var isPowerSaveMode: Boolean? = null
+    var hasSendSmsPermission: Boolean? = null
+    var hasReceiveSmsPermission: Boolean? = null
+    var hasReadPhoneStatePermission: Boolean? = null
+    var hasPostNotificationsPermission: Boolean? = null
+    var stickyNotificationEnabled: Boolean? = null
+    var usingLegacyUi: Boolean? = null
     var simInfo: SimInfoCollectionDTO? = null
 }

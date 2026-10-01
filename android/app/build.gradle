@@ -18,8 +18,8 @@ android {
     defaultConfig {
         minSdk 24
         targetSdk 35
-        versionCode 19
-        versionName "2.8.1"
+        versionCode 21
+        versionName "2.9.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -30,7 +30,22 @@ android {
 //        }
     }
     def debugKeystoreHome = System.getenv("HOME") ?: System.getProperty("user.home")
+    // Supplied locally; never commit signing material. An existing certificate
+    // may have a Debug subject while still being the owner's upgrade identity.
+    def ownerReleaseStore = project.findProperty('textbeeReleaseStoreFile') ?: System.getenv('TEXTBEE_RELEASE_STORE_FILE')
+    def ownerReleaseStorePassword = project.findProperty('textbeeReleaseStorePassword') ?: System.getenv('TEXTBEE_RELEASE_STORE_PASSWORD')
+    def ownerReleaseAlias = project.findProperty('textbeeReleaseKeyAlias') ?: System.getenv('TEXTBEE_RELEASE_KEY_ALIAS')
+    def ownerReleaseKeyPassword = project.findProperty('textbeeReleaseKeyPassword') ?: System.getenv('TEXTBEE_RELEASE_KEY_PASSWORD')
+    def hasOwnerReleaseSigning = [ownerReleaseStore, ownerReleaseStorePassword, ownerReleaseAlias, ownerReleaseKeyPassword].every { it }
     signingConfigs {
+        if (hasOwnerReleaseSigning) {
+            ownerRelease {
+                storeFile file(ownerReleaseStore)
+                storePassword ownerReleaseStorePassword
+                keyAlias ownerReleaseAlias
+                keyPassword ownerReleaseKeyPassword
+            }
+        }
         debug {
             storeFile file("${debugKeystoreHome}/.android/debug.keystore")
             storePassword "android"
@@ -43,8 +58,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // TODO: Change to release signing config
-            signingConfig signingConfigs.debug
+            // Release identity is explicit and independent of debug settings.
+            // Without it Gradle produces a clearly named unsigned candidate.
+            if (hasOwnerReleaseSigning) signingConfig signingConfigs.ownerRelease
         }
         debug {
             minifyEnabled false
@@ -78,6 +94,7 @@ android {
         selfhosted {
             dimension "environment"
             applicationId "com.vernu.sms.selfhosted"
+            versionName "2.9.0-selfhosted"
             buildConfigField "String", "API_BASE_URL", '"https://textbee.srv1093654.hstgr.cloud/api/v1/"'
             buildConfigField "String", "WEB_BASE_URL", '"https://textbee-cloud.vercel.app"'
             buildConfigField "String", "ENVIRONMENT", '"production"'
@@ -103,6 +120,7 @@ dependencies {
 
     implementation 'androidx.appcompat:appcompat:1.3.0'
     implementation 'com.google.android.material:material:1.8.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
     implementation 'androidx.constraintlayout:constraintlayout:2.0.4'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'
@@ -117,9 +135,13 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.9.0'
     implementation 'com.squareup.retrofit2:retrofit:2.9.0'
     implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    // Declared rather than taken transitively from Retrofit: the app builds its
+    // own client to name itself in outgoing requests.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
     
     implementation 'androidx.work:work-runtime:2.7.1'
+    implementation 'androidx.concurrent:concurrent-futures:1.1.0'
 
     // Jetpack Compose
     implementation platform('androidx.compose:compose-bom:2023.08.00')

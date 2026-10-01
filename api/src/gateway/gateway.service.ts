@@ -23,7 +23,48 @@ import { BatchResponse, Message } from 'firebase-admin/messaging'
 import { WebhookEvent } from '../webhook/webhook-event.enum'
 import { WebhookService } from '../webhook/webhook.service'
 import { BillingService } from '../billing/billing.service'
+import { UsersService } from '../users/users.service'
 import { SmsQueueService } from './queue/sms-queue.service'
+import { escapeRegExp } from '../common/escape-regexp'
+import { normalizeOsFields } from './os-version'
+import { encodeCursor } from './cursor'
+import {
+  isMalformedReceivedSms,
+  isTooLateForWebhook,
+  lateArrivalTimestamps,
+  receivedSmsIgnoreReason,
+  resolveReceivedAt,
+} from './received-sms-input'
+import { appVersionMetadata } from './app-version-metadata'
+import { RECOVERY_MIN_VERSION_CODE, deviceConfigFor } from './device-config'
+import {
+  CLAIM_LIMIT,
+  POLL_COOLDOWN_MS,
+  pendingRecoveryFilter,
+  selfhostedPendingFilter,
+  toRecoveryPayload,
+} from './pending-recovery'
+import { errorHistoryPush } from './error-history'
+import {
+  resolveReportAttempt,
+  resolveReportedAt,
+} from './status-report-input'
+import { toDirection, toStoredType } from './message-direction'
+import { ParsedMessageQuery } from './message-query'
+import { smsAndroidConfig } from './fcm-push-options'
+import {
+  FCM_SEND_SKIPPED_ERROR_CODE,
+  shouldSkipFcmSend,
+  skippedBatchResponse,
+} from './fcm-send-skip'
+import { DispatchPlan } from './queue/dispatch-pacing'
+import { Job } from 'bull'
+import { claimFcmMessages } from './fcm-dispatch'
+
+// device.user is a ref, so it is an ObjectId unless the query populated it.
+function userIdOf(user: any) {
+  return user?._id ?? user
+}
 
 @Injectable()
 export class GatewayService {
@@ -37,6 +78,7 @@ export class GatewayService {
     private webhookService: WebhookService,
     private billingService: BillingService,
     private smsQueueService: SmsQueueService,
+    private usersService: UsersService,
   ) {}
 
   /**
@@ -48,6 +90,77 @@ export class GatewayService {
       return apps && apps.length > 0
     } catch {
       return false
+    }
+  }
+
+  private async dispatchDirectFcm(messages: Message[], skipped: boolean): Promise<BatchResponse> {
+    const claimed = await claimFcmMessages(this.smsModel, messages)
+    if (!claimed.length) return { successCount: 0, failureCount: 0, responses: [] }
+    const ids = claimed.map((message) => String(JSON.parse(message.data.smsData).smsId))
+    try {
+      const response = skipped ? skippedBatchResponse(claimed.length) : await firebaseAdmin.messaging().sendEach(claimed)
+      const rejected = response.responses.flatMap((result, index) => result.success ? [] : [ids[index]])
+      if (rejected.length) {
+        await this.smsModel.updateMany(
+          { _id: { $in: rejected } as any, status: 'dispatched' },
+          { $set: { status: 'failed', failedAt: new Date(), errorCode: 'FCM_DELIVERY_FAILED' } },
+        )
+      }
+      return response
+    } catch (error) {
+      await this.smsModel.updateMany(
+        { _id: { $in: ids } as any, status: 'dispatched' },
+        { $set: { status: 'unknown', errorCode: 'FCM_OUTCOME_UNKNOWN' } },
+      )
+      throw error
+    }
+  }
+
+  // Blocks creating or re-enabling a device when the user's plan device limit
+  // is reached. Effective limit comes from the subscription override or the
+  // plan (deviceLimit of -1 or missing means unlimited). Only enabled devices
+  // count toward the limit. Fails open if the limit lookup itself errors.
+  private async assertDeviceLimitNotReached(
+    userId: Types.ObjectId | string,
+    { excludeDeviceId }: { excludeDeviceId?: Types.ObjectId | string } = {},
+  ): Promise<void> {
+    let deviceLimit: number
+    try {
+      const limits = await this.billingService.getUserLimits(
+        userId?.toString(),
+      )
+      deviceLimit = limits?.deviceLimit ?? -1
+    } catch (error) {
+      console.error('assertDeviceLimitNotReached: failed to load limits', error)
+      return
+    }
+
+    if (deviceLimit == null || deviceLimit === -1) {
+      return
+    }
+
+    const filter: any = { user: userId, enabled: true }
+    if (excludeDeviceId) {
+      filter._id = { $ne: excludeDeviceId }
+    }
+    const activeDeviceCount = await this.deviceModel.countDocuments(filter)
+
+    if (activeDeviceCount >= deviceLimit) {
+      this.billingService
+        .notifyDeviceLimitReached(userId, deviceLimit, activeDeviceCount)
+        .catch((error) => {
+          console.error('failed to send device limit notification', error)
+        })
+
+      throw new HttpException(
+        {
+          message: `Active device limit reached: your plan allows up to ${deviceLimit} active device(s) and you have ${activeDeviceCount}. Disable or delete another device, or contact the instance administrator.`,
+          hasReachedLimit: true,
+          deviceLimit,
+          activeDeviceCount,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      )
     }
   }
 
@@ -68,6 +181,20 @@ export class GatewayService {
 
     const now = new Date()
     const deviceData: any = { ...input, user }
+    // set-default is the only writer; there is no ValidationPipe to strip it
+    delete deviceData.isDefault
+    // older builds serialize an unset versionCode as 0
+    if (!deviceData.appVersionCode) delete deviceData.appVersionCode
+    // normalizeOsFields owns these; raw OS metadata must never reach the display fields
+    delete deviceData.os
+    delete deviceData.osVersion
+    delete deviceData.osApiLevel
+    delete deviceData.osBuildFingerprint
+    delete deviceData.osVersionSource
+    Object.assign(
+      deviceData,
+      normalizeOsFields(input, device?.osVersionSource, device?.osVersion),
+    )
 
     // Set default name to "brand model" if not provided
     if (!deviceData.name && input.brand && input.model) {
@@ -89,21 +216,140 @@ export class GatewayService {
     }
 
     if (device && device.appVersionCode <= 11) {
+      // re-enable path: updateDevice enforces the device limit on the
+      // disabled -> enabled transition
       return await this.updateDevice(device._id.toString(), {
         ...deviceData,
         enabled: true,
       })
     } else {
-      return await this.deviceModel.create(deviceData)
+      await this.assertDeviceLimitNotReached(user._id)
+      deviceData.enabled = input.enabled ?? true
+
+      const existingDeviceCount = await this.deviceModel.countDocuments({
+        user: user._id,
+      })
+      if (existingDeviceCount === 0) {
+        deviceData.isDefault = true
+      }
+
+      const createdDevice = await this.deviceModel.create(deviceData)
+
+      // The app re-registers on every launch, so this has to be idempotent.
+      // markMilestone's $exists filter makes it a no-op after the first time.
+      this.usersService
+        .markMilestone(user._id, 'firstDeviceAt')
+        .catch(() => undefined)
+
+      return createdDevice
     }
   }
 
   async getDevicesForUser(user: User): Promise<any> {
-    return await this.deviceModel.find({ user: user._id })
+    // Exclude the push credential and hardware serial from the client response.
+    return await this.deviceModel.find(
+      { user: user._id },
+      '-fcmToken -serial',
+    )
   }
 
-  async getDeviceById(deviceId: string): Promise<any> {
-    return await this.deviceModel.findById(deviceId)
+  async getDeviceById(
+    deviceId: string,
+    userId?: string,
+    projection?: string,
+  ): Promise<any> {
+    if (userId) {
+      // Explicit casts so the scoped lookup never depends on schema-level
+      // string casting.
+      return await this.deviceModel.findOne(
+        {
+          _id: new Types.ObjectId(deviceId),
+          user: new Types.ObjectId(userId),
+        },
+        projection,
+      )
+    }
+    return await this.deviceModel.findById(deviceId, projection)
+  }
+
+  // Picks the device a deviceless send should go out from. An explicit id is
+  // authorized here because the route has no :id param for CanModifyDevice.
+  async resolveSenderDevice(user: User, deviceId?: string): Promise<any> {
+    // An empty or malformed id must 400, not silently fall back to another device
+    if (deviceId != null) {
+      if (!Types.ObjectId.isValid(deviceId)) {
+        throw new HttpException(
+          { error: 'Invalid device id' },
+          HttpStatus.BAD_REQUEST,
+        )
+      }
+
+      const device = await this.deviceModel.findOne({
+        _id: new Types.ObjectId(deviceId),
+        user: user._id,
+      })
+
+      if (!device) {
+        throw new HttpException(
+          { error: 'Device not found' },
+          HttpStatus.NOT_FOUND,
+        )
+      }
+
+      // sendSMS reports a disabled device
+      return device
+    }
+
+    const defaultDevice = await this.deviceModel.findOne({
+      user: user._id,
+      isDefault: true,
+      enabled: true,
+    })
+
+    if (defaultDevice) {
+      return defaultDevice
+    }
+
+    // BSON orders null/missing below dates, so never-heartbeated devices rank last
+    const lastActiveDevice = await this.deviceModel
+      .findOne({ user: user._id, enabled: true })
+      .sort({ lastHeartbeat: -1, _id: -1 })
+
+    if (lastActiveDevice) {
+      return lastActiveDevice
+    }
+
+    throw new HttpException(
+      {
+        success: false,
+        error: 'No enabled device found. Enable a device or pass a deviceId.',
+      },
+      HttpStatus.BAD_REQUEST,
+    )
+  }
+
+  async setDefaultDevice(deviceId: string): Promise<any> {
+    const device = await this.deviceModel.findById(deviceId)
+
+    if (!device) {
+      throw new HttpException(
+        {
+          error: 'Device not found',
+        },
+        HttpStatus.NOT_FOUND,
+      )
+    }
+
+    await this.deviceModel.updateMany(
+      { user: device.user, _id: { $ne: device._id }, isDefault: true },
+      { $set: { isDefault: false } },
+    )
+
+    return await this.deviceModel.findByIdAndUpdate(
+      deviceId,
+      { $set: { isDefault: true } },
+      { new: true },
+    )
   }
 
   async updateDevice(
@@ -121,13 +367,34 @@ export class GatewayService {
       )
     }
 
-    if (input.enabled !== false) {
-      input.enabled = true;
+    // A partial update that omits enabled must not flip a disabled device on
+    if (input.enabled === undefined) delete input.enabled
+
+    // enforce the device limit only on the disabled -> enabled transition so
+    // routine updates of already-enabled devices are never blocked
+    if (!device.enabled && input.enabled) {
+      await this.assertDeviceLimitNotReached(device.user as Types.ObjectId, {
+        excludeDeviceId: device._id,
+      })
     }
 
     const now = new Date()
     const updateData: any = { ...input }
-    
+    // set-default is the only writer; there is no ValidationPipe to strip it
+    delete updateData.isDefault
+    // older builds serialize an unset versionCode as 0
+    if (!updateData.appVersionCode) delete updateData.appVersionCode
+    // normalizeOsFields owns these; raw OS metadata must never reach the display fields
+    delete updateData.os
+    delete updateData.osVersion
+    delete updateData.osApiLevel
+    delete updateData.osBuildFingerprint
+    delete updateData.osVersionSource
+    Object.assign(
+      updateData,
+      normalizeOsFields(input, device.osVersionSource, device.osVersion),
+    )
+
     // Handle simInfo if provided
     if (input.simInfo) {
       updateData.simInfo = {
@@ -138,19 +405,31 @@ export class GatewayService {
 
     if (input.fcmToken && input.fcmToken !== device.fcmToken) {
       updateData.fcmTokenUpdatedAt = now
-      updateData.fcmTokenInvalidatedAt = undefined
-      updateData.fcmTokenInvalidReason = undefined
     }
-    
+
     return await this.deviceModel.findByIdAndUpdate(
       deviceId,
-      { $set: updateData },
+      this.tokenUpdate(device, input.fcmToken, updateData),
       { new: true },
     )
   }
 
+  // Mongoose drops undefined keys from $set, so clearing an invalidation
+  // needs $unset. Any reported token clears it, changed or not.
+  private tokenUpdate(
+    device: { fcmTokenInvalidatedAt?: Date },
+    fcmToken: string | undefined,
+    updateData: Record<string, unknown>,
+  ) {
+    const update: Record<string, unknown> = { $set: updateData }
+    if (fcmToken && device.fcmTokenInvalidatedAt) {
+      update.$unset = { fcmTokenInvalidatedAt: 1, fcmTokenInvalidReason: 1 }
+    }
+    return update
+  }
+
   async deleteDevice(deviceId: string): Promise<any> {
-    const device = await this.deviceModel.findById(deviceId)
+    const device = await this.deviceModel.findById(deviceId).lean()
 
     if (!device) {
       throw new HttpException(
@@ -161,19 +440,33 @@ export class GatewayService {
       )
     }
 
-    await this.deviceTombstoneModel.updateOne(
-      { deviceId: new Types.ObjectId(deviceId) },
+    const id = new Types.ObjectId(deviceId)
+    const written = await this.deviceTombstoneModel.updateOne(
+      { deviceId: id },
       {
         $setOnInsert: {
-          deviceId: new Types.ObjectId(deviceId),
+          deviceId: id,
           userId: device.user,
           deletedAt: new Date(),
+          device,
         },
       },
       { upsert: true },
     )
 
-    await this.deviceModel.findByIdAndDelete(deviceId)
+    try {
+      await this.deviceModel.findByIdAndDelete(deviceId)
+    } catch (error) {
+      // The record must not outlive a delete that did not happen, or the
+      // device reads as gone while it is still live. Only a record this call
+      // created is taken back, and only while the device is still there: an
+      // error raised after the delete landed leaves the record alone, since
+      // that is the only copy of the device left.
+      if (written.upsertedCount && (await this.deviceModel.exists({ _id: id }))) {
+        await this.deviceTombstoneModel.deleteOne({ deviceId: id })
+      }
+      throw error
+    }
 
     return { success: true }
   }
@@ -227,6 +520,28 @@ export class GatewayService {
     }
   }
 
+  // Records when each paced wave is due so the stale-status cron leaves
+  // messages alone while they legitimately wait in the queue.
+  private async stampDispatchDueAt(
+    smsIds: Types.ObjectId[],
+    plan: DispatchPlan,
+    now: number,
+  ): Promise<void> {
+    const paced = plan.waves.length > 1 || plan.waves[0]?.delayMs > 0
+    if (!paced || smsIds.length === 0) {
+      return
+    }
+    await this.smsModel.bulkWrite(
+      plan.waves.map((wave) => ({
+        updateMany: {
+          filter: { _id: { $in: smsIds.slice(wave.start, wave.end) } },
+          update: { $set: { dispatchDueAt: new Date(now + wave.delayMs) } },
+        },
+      })),
+      { ordered: false },
+    )
+  }
+
   async sendSMS(deviceId: string, smsData: SendSMSInputDTO): Promise<any> {
     const device = await this.deviceModel.findById(deviceId)
 
@@ -267,7 +582,7 @@ export class GatewayService {
     const delayMs = this.calculateDelayFromScheduledAt(smsData.scheduledAt)
 
     // Validate that scheduling requires queue to be enabled
-    if (delayMs !== undefined && !this.smsQueueService.isQueueEnabled()) {
+    if (delayMs !== undefined && device.smsTransport !== 'poll' && device.fcmToken && this.isFirebaseAvailable() && !this.smsQueueService.isQueueEnabled()) {
       throw new HttpException(
         {
           success: false,
@@ -308,6 +623,7 @@ export class GatewayService {
     }
 
     const fcmMessages: Message[] = []
+    const smsIds: Types.ObjectId[] = []
 
     for (let recipient of recipients) {
       recipient = recipient.replace(/\s+/g, "")
@@ -320,9 +636,13 @@ export class GatewayService {
         recipient,
         requestedAt: new Date(),
         status: 'pending',
+        recoverySafeAtQueue: (device.appVersionInfo?.versionCode ?? device.appVersionCode ?? 0) >= RECOVERY_MIN_VERSION_CODE,
+        ...(smsData.scheduledAt && { dispatchDueAt: new Date(smsData.scheduledAt) }),
         ...(smsData.simSubscriptionId !== undefined && {
           simSubscriptionId: smsData.simSubscriptionId,
         }),
+        // The build the device was on when queued; the status report replaces it
+        metadata: appVersionMetadata(device),
       })
       const updatedSMSData = {
         smsId: sms._id,
@@ -344,11 +664,20 @@ export class GatewayService {
           smsData: stringifiedSMSData,
         },
         token: device.fcmToken,
-        android: {
-          priority: 'high',
-        },
+        android: smsAndroidConfig(smsData.scheduledAt),
       }
       fcmMessages.push(fcmMessage)
+      smsIds.push(sms._id)
+    }
+
+    // Poll-only devices must never enter the FCM worker, which would fail them.
+    if (device.smsTransport === 'poll' || !device.fcmToken || !this.isFirebaseAvailable()) {
+      return {
+        success: true,
+        message: 'SMS saved for device polling',
+        smsBatchId: smsBatch._id,
+        recipientCount: recipients.length,
+      }
     }
 
     // Check if we should use the queue
@@ -359,12 +688,21 @@ export class GatewayService {
           $set: { status: 'processing' },
         })
 
-        // Add to queue
+        // Persist the wave plan first so a write failure leaves no live jobs
+        const queuedAt = Date.now()
+        const plan = this.smsQueueService.planSendSmsJob(
+          fcmMessages.length,
+          delayMs,
+          device.smsSendDelaySeconds,
+        )
+        await this.stampDispatchDueAt(smsIds, plan, queuedAt)
         await this.smsQueueService.addSendSmsJob(
           deviceId,
           fcmMessages,
           smsBatch._id.toString(),
           delayMs,
+          device.smsSendDelaySeconds,
+          plan,
         )
 
         return {
@@ -372,6 +710,11 @@ export class GatewayService {
           message: 'SMS added to queue for processing',
           smsBatchId: smsBatch._id,
           recipientCount: recipients.length,
+          ...(plan.waves.length > 1 && {
+            estimatedCompletionAt: new Date(
+              queuedAt + plan.projectedCompletionMs,
+            ).toISOString(),
+          }),
         }
       } catch (e) {
         // Update batch status to failed
@@ -410,20 +753,38 @@ export class GatewayService {
     }
 
     try {
-      const response = await firebaseAdmin.messaging().sendEach(fcmMessages)
+      const skipped = shouldSkipFcmSend(device.user, deviceId)
+      const response = await this.dispatchDirectFcm(fcmMessages, skipped)
 
       console.log(response)
 
-      // Firebase push failed but SMS is saved - app can still poll for it
+      if (skipped) {
+        await this.smsModel.updateMany(
+          { smsBatch: smsBatch._id },
+          { $set: { errorCode: FCM_SEND_SKIPPED_ERROR_CODE } },
+        )
+      }
+
+      const unknownCount = Math.max(0, recipients.length - response.successCount - response.failureCount)
+      await this.smsBatchModel.findByIdAndUpdate(smsBatch._id, {
+        $set: {
+          successCount: response.successCount,
+          failureCount: response.failureCount,
+          status: unknownCount > 0 ? 'unknown' : response.failureCount === 0 ? 'completed' : response.successCount > 0 ? 'partial_success' : 'failed',
+          'metadata.unknownCount': unknownCount,
+        },
+      })
+
       if (response.successCount === 0) {
-        console.warn('[GatewayService] Firebase push failed, SMS saved for polling')
         return {
-          success: true,
-          message: 'SMS queued for sending (push notification failed, app will poll)',
+          ...response,
+          success: false,
+          message: unknownCount > 0 ? 'Push outcome unknown. Check message status before retrying.' : 'Push delivery failed',
           smsBatchId: smsBatch._id,
           recipientCount: recipients.length,
-          successCount: recipients.length,
-          failureCount: 0,
+          successCount: 0,
+          failureCount: response.failureCount,
+          unknownCount,
           pushNotificationFailed: true,
         }
       }
@@ -438,27 +799,24 @@ export class GatewayService {
           console.log(e)
         })
 
-      this.smsBatchModel
-        .findByIdAndUpdate(smsBatch._id, {
-          $set: { status: 'completed' },
-        })
-        .exec()
-        .catch((e) => {
-          console.error('failed to update sms batch status to completed')
-        })
+      // sentSMSCount is read before the increment above, so a zero here means
+      // this send is the account's first.
+      if (device.sentSMSCount === 0 && response.successCount > 0) {
+        this.usersService
+          .markMilestone(userIdOf(device.user), 'firstSmsAt')
+          .catch(() => undefined)
+      }
 
-      return response
+      return { ...response, success: response.successCount === recipients.length && response.failureCount === 0 && unknownCount === 0, unknownCount, smsBatchId: smsBatch._id, recipientCount: recipients.length }
     } catch (e) {
-      // Firebase error but SMS is saved - don't fail the request
-      console.error('[GatewayService] Firebase error, SMS saved for polling:', e.message)
       return {
-        success: true,
-        message: 'SMS queued for sending (push notification error, app will poll)',
+        success: false,
+        message: 'Push outcome unknown. Check message status before retrying.',
         smsBatchId: smsBatch._id,
         recipientCount: recipients.length,
-        successCount: recipients.length,
+        successCount: 0,
         failureCount: 0,
-        pushNotificationError: e.message,
+        unknownCount: recipients.length,
       }
     }
   }
@@ -498,7 +856,7 @@ export class GatewayService {
 
     // Check if any message has scheduledAt and validate queue is enabled
     const hasScheduledMessages = body.messages.some((m) => m.scheduledAt)
-    if (hasScheduledMessages && !this.smsQueueService.isQueueEnabled()) {
+    if (hasScheduledMessages && device.smsTransport !== 'poll' && device.fcmToken && this.isFirebaseAvailable() && !this.smsQueueService.isQueueEnabled()) {
       throw new HttpException(
         {
           success: false,
@@ -524,13 +882,20 @@ export class GatewayService {
     })
 
     // Track FCM messages with their calculated delays for grouping
-    const fcmMessagesWithDelays: Array<{ message: Message; delayMs?: number }> = []
+    const fcmMessagesWithDelays: Array<{
+      message: Message
+      scheduledTime?: number
+      smsId: Types.ObjectId
+    }> = []
+    // The build the device was on when queued; the status report replaces it
+    const queuedAppVersion = appVersionMetadata(device)
     const smsDocumentsToInsert: Array<Record<string, any>> = []
     const smsToFcmMetadata: Array<{
       recipient: string
       message: string
       simSubscriptionId?: number
-      delayMs?: number
+      scheduledTime?: number
+      scheduledAt?: string
     }> = []
 
     for (const smsData of messages) {
@@ -545,8 +910,13 @@ export class GatewayService {
         continue
       }
 
-      // Calculate delay for this message's scheduledAt
+      // Validates scheduledAt; the queue delay itself is computed per group
+      // right before enqueueing so equal times share one wave plan
       const delayMs = this.calculateDelayFromScheduledAt(smsData.scheduledAt)
+      const scheduledTime =
+        delayMs === undefined
+          ? undefined
+          : new Date(smsData.scheduledAt).getTime()
 
       for (let recipient of recipients) {
         recipient = recipient.replace(/\s+/g, "")
@@ -559,9 +929,12 @@ export class GatewayService {
           recipient,
           requestedAt: new Date(),
           status: 'pending',
+          recoverySafeAtQueue: (device.appVersionInfo?.versionCode ?? device.appVersionCode ?? 0) >= RECOVERY_MIN_VERSION_CODE,
+          ...(scheduledTime !== undefined && { dispatchDueAt: new Date(scheduledTime) }),
           ...(smsData.simSubscriptionId !== undefined && {
             simSubscriptionId: smsData.simSubscriptionId,
           }),
+          metadata: queuedAppVersion,
         })
         smsToFcmMetadata.push({
           recipient,
@@ -569,7 +942,8 @@ export class GatewayService {
           ...(smsData.simSubscriptionId !== undefined && {
             simSubscriptionId: smsData.simSubscriptionId,
           }),
-          delayMs,
+          scheduledTime,
+          scheduledAt: smsData.scheduledAt,
         })
       }
     }
@@ -625,34 +999,92 @@ export class GatewayService {
           smsData: stringifiedSMSData,
         },
         token: device.fcmToken,
-        android: {
-          priority: 'high',
-        },
+        android: smsAndroidConfig(metadata.scheduledAt),
       }
-      fcmMessagesWithDelays.push({ message: fcmMessage, delayMs: metadata.delayMs })
+      fcmMessagesWithDelays.push({
+        message: fcmMessage,
+        scheduledTime: metadata.scheduledTime,
+        smsId: sms._id,
+      })
+    }
+
+    if (device.smsTransport === 'poll' || !device.fcmToken || !this.isFirebaseAvailable()) {
+      return {
+        success: true,
+        message: 'Bulk SMS saved for device polling',
+        smsBatchId: smsBatch._id,
+        recipientCount: insertedSmsDocs.length,
+      }
     }
 
     // Check if we should use the queue
     if (this.smsQueueService.isQueueEnabled()) {
+      const addedJobs: Job[] = []
       try {
-        // Group messages by delay (undefined delay means immediate, group together)
-        const messagesByDelay = new Map<number | undefined, Message[]>()
-        for (const { message, delayMs } of fcmMessagesWithDelays) {
-          const delayKey = delayMs !== undefined ? delayMs : undefined
-          if (!messagesByDelay.has(delayKey)) {
-            messagesByDelay.set(delayKey, [])
+        await this.smsBatchModel.findByIdAndUpdate(smsBatch._id, {
+          $set: { status: 'processing' },
+        })
+
+        // Group messages by scheduled time (undefined means immediate, group together)
+        const messagesBySchedule = new Map<
+          number | undefined,
+          { messages: Message[]; smsIds: Types.ObjectId[] }
+        >()
+        for (const { message, scheduledTime, smsId } of fcmMessagesWithDelays) {
+          if (!messagesBySchedule.has(scheduledTime)) {
+            messagesBySchedule.set(scheduledTime, { messages: [], smsIds: [] })
           }
-          messagesByDelay.get(delayKey)!.push(message)
+          const group = messagesBySchedule.get(scheduledTime)!
+          group.messages.push(message)
+          group.smsIds.push(smsId)
         }
 
-        // Queue each group with its respective delay
-        for (const [delayMs, messages] of messagesByDelay.entries()) {
-          await this.smsQueueService.addSendSmsJob(
-            deviceId,
-            messages,
-            smsBatch._id.toString(),
+        // Plan and persist every group first, then enqueue, so a failure
+        // before the queue step leaves no live jobs and one during it can
+        // roll back the jobs already added.
+        const queuedAt = Date.now()
+        let multiWave = false
+        let projectedCompletionMs = 0
+        const plannedGroups: Array<{
+          messages: Message[]
+          delayMs?: number
+          plan: DispatchPlan
+        }> = []
+        for (const [scheduledTime, group] of messagesBySchedule.entries()) {
+          const delayMs =
+            scheduledTime === undefined
+              ? undefined
+              : Math.max(0, scheduledTime - queuedAt)
+          const plan = this.smsQueueService.planSendSmsJob(
+            group.messages.length,
             delayMs,
+            device.smsSendDelaySeconds,
           )
+          await this.stampDispatchDueAt(group.smsIds, plan, queuedAt)
+          plannedGroups.push({ messages: group.messages, delayMs, plan })
+          multiWave = multiWave || plan.waves.length > 1
+          projectedCompletionMs = Math.max(
+            projectedCompletionMs,
+            plan.projectedCompletionMs,
+          )
+        }
+
+        for (const { messages: groupMessages, delayMs, plan } of plannedGroups) {
+          try {
+            addedJobs.push(
+              ...(await this.smsQueueService.addSendSmsJob(
+                deviceId,
+                groupMessages,
+                smsBatch._id.toString(),
+                delayMs,
+                device.smsSendDelaySeconds,
+                plan,
+              )),
+            )
+          } catch (e) {
+            await this.smsQueueService.removeJobs(addedJobs)
+            throw e
+          }
         }
 
         return {
@@ -660,6 +1092,11 @@ export class GatewayService {
           message: 'Bulk SMS added to queue for processing',
           smsBatchId: smsBatch._id,
           recipientCount: messages.map((m) => m.recipients).flat().length,
+          ...(multiWave && {
+            estimatedCompletionAt: new Date(
+              queuedAt + projectedCompletionMs,
+            ).toISOString(),
+          }),
         }
       } catch (e) {
         // Update batch status to failed
@@ -708,10 +1145,22 @@ export class GatewayService {
     const fcmMessagesBatches = fcmMessages.map((m) => [m])
     const fcmResponses: BatchResponse[] = []
     let firebaseErrorCount = 0
+    const skipped = shouldSkipFcmSend(device.user, deviceId)
+
+    if (skipped) {
+      await this.smsModel.updateMany(
+        { smsBatch: smsBatch._id },
+        { $set: { errorCode: FCM_SEND_SKIPPED_ERROR_CODE } },
+      )
+    }
+
+    // fcmMessagesBatches holds one message per entry, so anything inside this
+    // loop runs once per recipient. The milestone is tracked outside it.
+    let isFirstSmsForAccount = device.sentSMSCount === 0
 
     for (const batch of fcmMessagesBatches) {
       try {
-        const response = await firebaseAdmin.messaging().sendEach(batch)
+        const response = await this.dispatchDirectFcm(batch, skipped)
 
         console.log(response)
         fcmResponses.push(response)
@@ -726,14 +1175,13 @@ export class GatewayService {
             console.log(e)
           })
 
-        this.smsBatchModel
-          .findByIdAndUpdate(smsBatch._id, {
-            $set: { status: 'completed' },
-          })
-          .exec()
-          .catch((e) => {
-            console.error('failed to update sms batch status to completed')
-          })
+        if (isFirstSmsForAccount && response.successCount > 0) {
+          isFirstSmsForAccount = false
+          this.usersService
+            .markMilestone(userIdOf(device.user), 'firstSmsAt')
+            .catch(() => undefined)
+        }
+
       } catch (e) {
         console.log('[GatewayService] Firebase push error for batch, SMS saved for polling:', e.message)
         firebaseErrorCount++
@@ -749,29 +1197,48 @@ export class GatewayService {
       0,
     )
 
-    // If all Firebase pushes failed, still return success since SMS is saved
+    // An ambiguous push is not proof of SMS acceptance and must not invite retries.
     if (fcmResponses.length === 0 && firebaseErrorCount > 0) {
+      await this.smsBatchModel.findByIdAndUpdate(smsBatch._id, {
+        $set: { status: 'unknown', 'metadata.unknownCount': fcmMessages.length },
+      })
       return {
-        success: true,
-        message: 'Bulk SMS queued for sending (push notification failed, app will poll)',
+        success: false,
+        message: 'Push outcome unknown. Check message status before retrying.',
         smsBatchId: smsBatch._id,
-        recipientCount: body.messages.length,
-        successCount: body.messages.length,
+        recipientCount: fcmMessages.length,
+        successCount: 0,
         failureCount: 0,
+        unknownCount: fcmMessages.length,
         pushNotificationFailed: true,
       }
     }
 
     const response = {
-      success: successCount > 0 || firebaseErrorCount > 0, // Success if FCM worked OR if SMS saved for polling
-      successCount: successCount || body.messages.length,
+      success: successCount === fcmMessages.length && failureCount === 0 && firebaseErrorCount === 0,
+      smsBatchId: smsBatch._id,
+      recipientCount: fcmMessages.length,
+      successCount,
       failureCount,
+      unknownCount: firebaseErrorCount,
       fcmResponses,
     }
+    await this.smsBatchModel.findByIdAndUpdate(smsBatch._id, {
+      $set: {
+        successCount,
+        failureCount,
+        status: firebaseErrorCount > 0 ? 'unknown' : failureCount === 0 ? 'completed' : successCount > 0 ? 'partial_success' : 'failed',
+        'metadata.unknownCount': firebaseErrorCount,
+      },
+    })
     return response
   }
 
-  async receiveSMS(deviceId: string, dto: ReceivedSMSDTO): Promise<any> {
+  async receiveSMS(
+    deviceId: string,
+    dto: ReceivedSMSDTO,
+    sdkClient?: string,
+  ): Promise<any> {
     const device = await this.deviceModel.findById(deviceId)
 
     if (!device) {
@@ -784,11 +1251,9 @@ export class GatewayService {
       )
     }
 
-    if (
-      (!dto.receivedAt && !dto.receivedAtInMillis) ||
-      !dto.sender ||
-      !dto.message
-    ) {
+    // Type checks matter: without a global ValidationPipe the body is not
+    // coerced, and these fields flow into query filters.
+    if (isMalformedReceivedSms(dto.sender, dto.message)) {
       console.error(`receiveSMS: Invalid received SMS data (sender: ${dto.sender}, message: ${dto.message}) (receivedAt: ${dto.receivedAt}, receivedAtInMillis: ${dto.receivedAtInMillis})`)
       throw new HttpException(
         {
@@ -799,15 +1264,30 @@ export class GatewayService {
       )
     }
 
-    await this.billingService.canPerformAction(
+    // A success response stops the app from retrying a message it cannot fix.
+    const ignoredReason = receivedSmsIgnoreReason(dto.sender, dto.message)
+    if (ignoredReason) {
+      console.warn(
+        `receiveSMS: ignored received SMS for device ${deviceId} (${ignoredReason})`,
+      )
+      return { ignored: true, reason: ignoredReason }
+    }
+
+    const { overLimit } = await this.billingService.canPerformAction(
       device.user.toString(),
       'receive_sms',
       1,
     )
 
-    const receivedAt = dto.receivedAtInMillis
-      ? new Date(dto.receivedAtInMillis)
-      : dto.receivedAt
+    const receivedAt = resolveReceivedAt(
+      dto.receivedAtInMillis,
+      dto.receivedAt,
+    )
+
+    // Narrowed here, not only in isMalformedReceivedSms, so the filter below
+    // provably takes strings and never a query operator object.
+    const sender = typeof dto.sender === 'string' ? dto.sender : ''
+    const message = typeof dto.message === 'string' ? dto.message : ''
 
     // Deduplication: Check for existing SMS with same device, sender, message, and receivedAt (within ±5 seconds tolerance)
     const toleranceMs = 5000 // 5 seconds
@@ -817,8 +1297,8 @@ export class GatewayService {
     const existingSMS = await this.smsModel.findOne({
       device: device._id,
       type: SMSType.RECEIVED,
-      sender: dto.sender,
-      message: dto.message,
+      sender,
+      message,
       receivedAt: {
         $gte: toleranceStart,
         $lte: toleranceEnd,
@@ -835,11 +1315,14 @@ export class GatewayService {
     const sms = await this.smsModel.create({
       user: device.user,
       device: device._id,
-      message: dto.message,
+      message,
       type: SMSType.RECEIVED,
       status: 'received',
-      sender: dto.sender,
+      sender,
       receivedAt,
+      ...lateArrivalTimestamps(receivedAt, device.createdAt),
+      ...(overLimit && { overLimit: true }),
+      metadata: appVersionMetadata(device, sdkClient),
     })
 
     this.deviceModel
@@ -852,15 +1335,17 @@ export class GatewayService {
         console.log(e)
       })
 
-    this.webhookService
-      .deliverNotification({
-        sms,
-        user: device.user,
-        event: WebhookEvent.MESSAGE_RECEIVED,
-      })
-      .catch((e) => {
-        console.log(e)
-      })
+    if (!isTooLateForWebhook(receivedAt)) {
+      this.webhookService
+        .deliverNotification({
+          sms,
+          user: device.user,
+          event: WebhookEvent.MESSAGE_RECEIVED,
+        })
+        .catch((e) => {
+          console.log(e)
+        })
+    }
 
     return sms
   }
@@ -930,6 +1415,7 @@ export class GatewayService {
     type = '',
     page = 1,
     limit = 50,
+    search = '',
   ): Promise<{ data: any[]; meta: any }> {
     const device = await this.deviceModel.findById(deviceId)
 
@@ -953,6 +1439,19 @@ export class GatewayService {
       query.type = SMSType.SENT
     } else if (type === 'received') {
       query.type = SMSType.RECEIVED
+    }
+
+    // Free-text search across the message body and either party's number.
+    // The input is escaped before it reaches RegExp: an unescaped "(" throws
+    // and fails the request, and a crafted pattern is a ReDoS vector.
+    const trimmedSearch = search?.trim()
+    if (trimmedSearch) {
+      const pattern = new RegExp(escapeRegExp(trimmedSearch), 'i')
+      query.$or = [
+        { message: pattern },
+        { recipient: pattern },
+        { sender: pattern },
+      ]
     }
 
     // Get total count for pagination metadata
@@ -986,7 +1485,160 @@ export class GatewayService {
     }
   }
 
-  async updateSMSStatus(deviceId: string, dto: UpdateSMSStatusDTO): Promise<any> {
+  // Account-level history. Always constrains device to the caller's live
+  // devices: messages from deleted devices keep a dangling ref and must not
+  // surface (a future includeDeleted widens this same $in from tombstones).
+  async getMessagesForUser(
+    user: User,
+    filters: ParsedMessageQuery,
+    page = 1,
+    limit = 50,
+  ): Promise<{ data: any[]; meta: any }> {
+    const liveDevices = await this.deviceModel.find(
+      { user: user._id },
+      '_id',
+    )
+    const liveDeviceIds = liveDevices.map((d) => d._id)
+
+    let scopedDeviceIds = liveDeviceIds
+    if (filters.deviceIds?.length) {
+      const liveSet = new Set(liveDeviceIds.map(String))
+      const unknown = filters.deviceIds.find((id) => !liveSet.has(String(id)))
+      if (unknown) {
+        throw new HttpException(
+          { error: `Device not found: ${unknown}` },
+          HttpStatus.NOT_FOUND,
+        )
+      }
+      scopedDeviceIds = filters.deviceIds
+    }
+
+    if (scopedDeviceIds.length === 0) {
+      // Zero live devices: nothing can match, skip the sms collection
+      return filters.cursor
+        ? { meta: { limit, nextCursor: null, hasMore: false }, data: [] }
+        : { meta: { page, limit, total: 0, totalPages: 0 }, data: [] }
+    }
+
+    const query: any = {
+      user: user._id,
+      device: { $in: scopedDeviceIds },
+    }
+    if (filters.smsBatchId) {
+      // 404 on an unowned batch, matching the deviceIds contract. A legacy
+      // batch without a user field falls through; the device $in above still
+      // scopes what its filter can return.
+      const batch = await this.smsBatchModel.findOne(
+        { _id: filters.smsBatchId },
+        'user',
+      )
+      if (!batch || (batch.user && String(batch.user) !== String(user._id))) {
+        throw new HttpException(
+          { error: `Batch not found: ${filters.smsBatchId}` },
+          HttpStatus.NOT_FOUND,
+        )
+      }
+      query.smsBatch = filters.smsBatchId
+    }
+    if (filters.direction) {
+      query.type = toStoredType(filters.direction)
+    }
+    if (filters.status) {
+      query.status = filters.status
+    }
+    if (filters.search) {
+      const pattern = new RegExp(escapeRegExp(filters.search), 'i')
+      query.$or = [
+        { message: pattern },
+        { recipient: pattern },
+        { sender: pattern },
+      ]
+    }
+    if (filters.from || filters.to) {
+      query.createdAt = {
+        ...(filters.from && { $gte: filters.from }),
+        ...(filters.to && { $lt: filters.to }),
+      }
+    }
+
+    const desc = filters.order === 'desc'
+    const sort: Record<string, 1 | -1> = desc
+      ? { createdAt: -1, _id: -1 }
+      : { createdAt: 1, _id: 1 }
+
+    if (filters.cursor) {
+      // Keyset predicate with _id tiebreaker: bulk sends insert whole batches
+      // in one createdAt millisecond, so timestamp alone repeats or skips them
+      const { createdAt, id } = filters.cursor
+      const op = desc ? '$lt' : '$gt'
+      const keyset = {
+        $or: [
+          { createdAt: { [op]: createdAt } },
+          { createdAt, _id: { [op]: id } },
+        ],
+      }
+      const findQuery = query.$or
+        ? { $and: [query, keyset] }
+        : { ...query, ...keyset }
+
+      const data = await this.smsModel
+        .find(findQuery, null, { sort, limit: limit + 1 })
+        .populate({ path: 'device', select: '_id brand model buildId enabled' })
+        .lean()
+
+      const hasMore = data.length > limit
+      const pageData = hasMore ? data.slice(0, limit) : data
+      const last = pageData[pageData.length - 1]
+      return {
+        meta: {
+          limit,
+          nextCursor:
+            hasMore && last
+              ? encodeCursor(new Date(last.createdAt as any), last._id as any)
+              : null,
+          hasMore,
+        },
+        data: this.decorateDirection(pageData),
+      }
+    }
+
+    const skip = (page - 1) * limit
+    const total = await this.smsModel.countDocuments(query)
+    const data = await this.smsModel
+      .find(query, null, { sort, limit, skip })
+      .populate({ path: 'device', select: '_id brand model buildId enabled' })
+      .lean()
+
+    // nextCursor here too, so a poller can enter keyset mode from its first
+    // (cursorless) call instead of needing a separate bootstrap step
+    const hasMore = skip + data.length < total
+    const last = data[data.length - 1]
+    return {
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        nextCursor:
+          hasMore && last
+            ? encodeCursor(new Date(last.createdAt as any), last._id as any)
+            : null,
+        hasMore,
+      },
+      data: this.decorateDirection(data),
+    }
+  }
+
+  // API vocabulary: lowercase direction derived from the stored type field
+  private decorateDirection(messages: any[]): any[] {
+    return messages.map((m) => ({ ...m, direction: toDirection(m.type) }))
+  }
+
+  async updateSMSStatus(
+    deviceId: string,
+    dto: UpdateSMSStatusDTO,
+    sdkClient?: string,
+  ): Promise<any> {
 
     const device = await this.deviceModel.findById(deviceId);
     
@@ -1029,28 +1681,72 @@ export class GatewayService {
     const updateData: any = {
       status: normalizedStatus, // Store normalized status
     };
+
+    // Dotted paths so other metadata keys survive.
+    for (const [key, value] of Object.entries(
+      appVersionMetadata(device, sdkClient),
+    )) {
+      updateData[`metadata.${key}`] = value;
+    }
     
+    // What the phone did before the radio: both are reported on every status
+    // for the same send, so a later report just restates them
+    const pushReceivedAt = resolveReportedAt(dto.pushReceivedAtInMillis)
+    const sendAttemptedAt = resolveReportedAt(dto.sendAttemptedAtInMillis)
+    // A reversed pair would make the on-device wait negative, so drop both
+    // rather than store a leg that cannot have happened.
+    const orderedTiming =
+      !pushReceivedAt || !sendAttemptedAt || sendAttemptedAt >= pushReceivedAt
+    if (pushReceivedAt && orderedTiming) {
+      updateData.pushReceivedAt = pushReceivedAt
+    }
+    if (sendAttemptedAt && orderedTiming) {
+      updateData.sendAttemptedAt = sendAttemptedAt
+    }
+    const reportAttempt = resolveReportAttempt(dto.reportAttempt)
+    if (reportAttempt !== undefined) {
+      updateData['metadata.statusReportAttempt'] = reportAttempt
+    }
+
     // Update timestamps based on status
+    let failureEntry: { $push: Record<string, any> } | null = null
     if (normalizedStatus === 'sent' && dto.sentAtInMillis) {
       updateData.sentAt = new Date(dto.sentAtInMillis);
     } else if (normalizedStatus === 'delivered' && dto.deliveredAtInMillis) {
       updateData.deliveredAt = new Date(dto.deliveredAtInMillis);
-    } else if (normalizedStatus === 'failed' && dto.failedAtInMillis) {
-      updateData.failedAt = new Date(dto.failedAtInMillis);
+    } else if (normalizedStatus === 'failed') {
+      // The timestamp is optional; the failure itself is not
+      // One validated value for both the field and the history entry
+      const failedAt = resolveReportedAt(dto.failedAtInMillis) ?? new Date()
+      updateData.failedAt = failedAt
       updateData.errorCode = dto.errorCode;
       updateData.errorMessage = dto.errorMessage || 'Unknown error';
+      failureEntry = errorHistoryPush(
+        {
+          code: dto.errorCode,
+          message: updateData.errorMessage,
+          source: 'device',
+        },
+        failedAt,
+      )
     }
     
     // Update the SMS
 const updatedSms = await this.smsModel.findByIdAndUpdate(
   dto.smsId,
-  { $set: updateData },
+  { $set: updateData, ...(failureEntry ?? {}) },
   { new: true } 
 );
     
-    // Check if all SMS in batch have the same status, then update batch status
-    if (dto.smsBatchId) {
-      const smsBatch = await this.smsBatchModel.findById(dto.smsBatchId);
+    // Check if all SMS in batch have the same status, then update batch status.
+    // The batch id comes from the body, so it is matched against this device.
+    if (dto.smsBatchId && Types.ObjectId.isValid(dto.smsBatchId)) {
+      // SMSBatch types `device` as the populated Device, so the filter is cast
+      // to match the ObjectId actually stored. Runtime behavior is unchanged.
+      const smsBatch = await this.smsBatchModel.findOne({
+        _id: dto.smsBatchId,
+        device: new Types.ObjectId(deviceId),
+      } as any);
       if (smsBatch) {
         const allSmsInBatch = await this.smsModel.find({ smsBatch: dto.smsBatchId });
         
@@ -1139,9 +1835,15 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     }
   }
 
-  async getSMSById(smsId: string): Promise<any> {
-
-    const sms = await this.smsModel.findById(smsId);
+  // Scoped to the device from the route so a message is only reachable through
+  // the device that owns it. A mismatch is reported as not found.
+  async getSMSById(deviceId: string, smsId: string): Promise<any> {
+    const sms = Types.ObjectId.isValid(smsId)
+      ? await this.smsModel.findOne({
+          _id: new Types.ObjectId(smsId),
+          device: new Types.ObjectId(deviceId),
+        })
+      : null;
 
     if (!sms) {
       throw new HttpException(
@@ -1156,9 +1858,13 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     return sms;
   }
 
-  async getSmsBatchById(smsBatchId: string): Promise<any> {
-
-    const smsBatch = await this.smsBatchModel.findById(smsBatchId);
+  async getSmsBatchById(deviceId: string, smsBatchId: string): Promise<any> {
+    const smsBatch = Types.ObjectId.isValid(smsBatchId)
+      ? await this.smsBatchModel.findOne({
+          _id: smsBatchId,
+          device: new Types.ObjectId(deviceId),
+        } as any)
+      : null;
 
     if (!smsBatch) {
       throw new HttpException(
@@ -1199,27 +1905,36 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
       )
     }
 
-    // Find pending SMS messages for this device
-    const pendingSMS = await this.smsModel
-      .find({
-        device: device._id,
-        type: SMSType.SENT,
-        status: 'pending',
-      })
-      .sort({ createdAt: 1 }) // Oldest first
-      .limit(limit)
-      .lean()
+    if (!device.enabled) {
+      throw new HttpException({ success: false, error: 'Device is disabled' }, HttpStatus.FORBIDDEN)
+    }
 
-    // Format for mobile app consumption
-    const messages = pendingSMS.map((sms) => ({
-      smsId: sms._id,
-      smsBatchId: sms.smsBatch,
-      message: sms.message,
-      recipients: [sms.recipient],
-      // Legacy fields for backward compatibility
-      smsBody: sms.message,
-      receivers: [sms.recipient],
-    }))
+    // Calling the authenticated legacy endpoint explicitly selects polling,
+    // including old builds that cannot send the new heartbeat header.
+    if (device.smsTransport !== 'poll') {
+      await this.deviceModel.findByIdAndUpdate(deviceId, { $set: { smsTransport: 'poll' } })
+    }
+
+    const versionCode = device.appVersionInfo?.versionCode ?? device.appVersionCode ?? 0
+    const now = new Date()
+    const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 50) : 10
+    const messages: any[] = []
+    while (messages.length < boundedLimit) {
+      const sms = await this.smsModel.findOneAndUpdate(
+        selfhostedPendingFilter(deviceId, versionCode, now, deviceConfigFor(device).recoveryPollEnabled),
+        {
+          $set: { status: 'dispatched', dispatchedAt: now },
+          $inc: { dispatchAttempts: 1 },
+        },
+        { new: true, sort: { requestedAt: 1, _id: 1 } },
+      )
+      if (!sms) break
+      messages.push({
+        ...toRecoveryPayload(sms),
+        smsBody: sms.message,
+        receivers: [sms.recipient],
+      })
+    }
 
     return {
       count: messages.length,
@@ -1227,9 +1942,83 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     }
   }
 
+  // Hands the phone the messages its push may have missed. Each claim is one
+  // atomic update, so two polls at once never get the same message.
+  async claimPendingMessages(deviceId: string): Promise<any[]> {
+    const device = await this.deviceModel.findById(deviceId)
+    if (!device) {
+      throw new HttpException(
+        { success: false, error: 'Device not found' },
+        HttpStatus.NOT_FOUND,
+      )
+    }
+
+    if (!device.enabled) {
+      throw new HttpException({ success: false, error: 'Device is disabled' }, HttpStatus.FORBIDDEN)
+    }
+
+    // Heartbeats write appVersionInfo; registration writes appVersionCode
+    const versionCode =
+      device.appVersionInfo?.versionCode ?? device.appVersionCode ?? 0
+    if (versionCode < RECOVERY_MIN_VERSION_CODE) {
+      throw new HttpException(
+        { success: false, error: 'This app version cannot recover messages' },
+        HttpStatus.FORBIDDEN,
+      )
+    }
+
+    if (!deviceConfigFor(device).recoveryPollEnabled) {
+      throw new HttpException({ success: false, error: 'Message recovery is disabled' }, HttpStatus.FORBIDDEN)
+    }
+
+    // One conditional update both checks and takes the cooldown, so two
+    // polls arriving together cannot both pass it
+    const now = new Date()
+    const admitted = await this.deviceModel.findOneAndUpdate(
+      {
+        _id: deviceId,
+        $or: [
+          { lastPendingPollAt: { $exists: false } },
+          { lastPendingPollAt: { $lt: new Date(now.getTime() - POLL_COOLDOWN_MS) } },
+        ],
+      },
+      { $set: { lastPendingPollAt: now } },
+    )
+    if (!admitted) {
+      throw new HttpException(
+        { success: false, error: 'Polled too recently' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      )
+    }
+
+    const claimed: any[] = []
+    while (claimed.length < CLAIM_LIMIT) {
+      const sms = await this.smsModel.findOneAndUpdate(
+        pendingRecoveryFilter(deviceId, now),
+        {
+          $set: {
+            status: 'dispatched',
+            dispatchedAt: now,
+            'metadata.recoveredAt': now,
+          },
+          $inc: { dispatchAttempts: 1 },
+        },
+        { new: true, sort: { requestedAt: 1 } },
+      )
+      if (!sms) break
+      claimed.push(toRecoveryPayload(sms))
+    }
+    return claimed
+  }
+
+  async countPendingMessages(deviceId: string, now = new Date()): Promise<number> {
+    return this.smsModel.countDocuments(pendingRecoveryFilter(deviceId, now))
+  }
+
   async heartbeat(
     deviceId: string,
     input: HeartbeatInputDTO,
+    pollOnly = false,
   ): Promise<HeartbeatResponseDTO> {
     const device = await this.deviceModel.findById(deviceId)
 
@@ -1246,6 +2035,7 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     const now = new Date()
     const updateData: any = {
       lastHeartbeat: now,
+      ...(pollOnly && { smsTransport: 'poll' }),
     }
 
     let fcmTokenUpdated = false
@@ -1254,8 +2044,6 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     if (input.fcmToken && input.fcmToken !== device.fcmToken) {
       updateData.fcmToken = input.fcmToken
       updateData.fcmTokenUpdatedAt = now
-      updateData.fcmTokenInvalidatedAt = undefined
-      updateData.fcmTokenInvalidReason = undefined
       fcmTokenUpdated = true
     }
 
@@ -1304,6 +2092,14 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
       updateData['appVersionInfo.lastUpdated'] = now
     }
 
+    // Update OS info if provided. These change at most once per OS upgrade,
+    // so skip keys already matching the stored value to keep the write a no-op.
+    for (const [key, value] of Object.entries(
+      normalizeOsFields(input, device.osVersionSource, device.osVersion),
+    )) {
+      if (device[key] !== value) updateData[key] = value
+    }
+
     // Update deviceUptimeInfo if provided
     if (input.deviceUptimeMillis !== undefined) {
       updateData['deviceUptimeInfo.uptimeMillis'] = input.deviceUptimeMillis
@@ -1321,6 +2117,75 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
       updateData['systemInfo.lastUpdated'] = now
     }
 
+    // Update memoryInfo if provided
+    if (
+      input.memoryFreeBytes !== undefined ||
+      input.memoryTotalBytes !== undefined ||
+      input.memoryMaxBytes !== undefined
+    ) {
+      if (input.memoryFreeBytes !== undefined) {
+        updateData['memoryInfo.freeBytes'] = input.memoryFreeBytes
+      }
+      if (input.memoryTotalBytes !== undefined) {
+        updateData['memoryInfo.totalBytes'] = input.memoryTotalBytes
+      }
+      if (input.memoryMaxBytes !== undefined) {
+        updateData['memoryInfo.maxBytes'] = input.memoryMaxBytes
+      }
+      updateData['memoryInfo.lastUpdated'] = now
+    }
+
+    // Update storageInfo if provided
+    if (
+      input.storageAvailableBytes !== undefined ||
+      input.storageTotalBytes !== undefined
+    ) {
+      if (input.storageAvailableBytes !== undefined) {
+        updateData['storageInfo.availableBytes'] = input.storageAvailableBytes
+      }
+      if (input.storageTotalBytes !== undefined) {
+        updateData['storageInfo.totalBytes'] = input.storageTotalBytes
+      }
+      updateData['storageInfo.lastUpdated'] = now
+    }
+
+    // Update powerInfo if provided
+    if (
+      input.isIgnoringBatteryOptimizations !== undefined ||
+      input.isDeviceIdleMode !== undefined ||
+      input.isPowerSaveMode !== undefined
+    ) {
+      if (input.isIgnoringBatteryOptimizations !== undefined) {
+        updateData['powerInfo.isIgnoringBatteryOptimizations'] =
+          input.isIgnoringBatteryOptimizations
+      }
+      if (input.isDeviceIdleMode !== undefined) {
+        updateData['powerInfo.isDeviceIdleMode'] = input.isDeviceIdleMode
+      }
+      if (input.isPowerSaveMode !== undefined) {
+        updateData['powerInfo.isPowerSaveMode'] = input.isPowerSaveMode
+      }
+      updateData['powerInfo.lastUpdated'] = now
+    }
+
+    // Update appStateInfo if provided
+    const appStateKeys = [
+      'hasSendSmsPermission',
+      'hasReceiveSmsPermission',
+      'hasReadPhoneStatePermission',
+      'hasPostNotificationsPermission',
+      'stickyNotificationEnabled',
+      'usingLegacyUi',
+    ] as const
+    if (appStateKeys.some((key) => input[key] !== undefined)) {
+      for (const key of appStateKeys) {
+        if (input[key] !== undefined) {
+          updateData[`appStateInfo.${key}`] = input[key]
+        }
+      }
+      updateData['appStateInfo.lastUpdated'] = now
+    }
+
     // Update simInfo if provided
     if (input.simInfo !== undefined) {
       updateData.simInfo = {
@@ -1330,9 +2195,10 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
     }
 
     // Update device with all changes
-    await this.deviceModel.findByIdAndUpdate(deviceId, {
-      $set: updateData,
-    })
+    await this.deviceModel.findByIdAndUpdate(
+      deviceId,
+      this.tokenUpdate(device, input.fcmToken, updateData),
+    )
 
     // Fetch updated device to get current name
     const updatedDevice = await this.deviceModel.findById(deviceId)
@@ -1342,6 +2208,8 @@ const updatedSms = await this.smsModel.findByIdAndUpdate(
       fcmTokenUpdated,
       lastHeartbeat: now,
       name: updatedDevice?.name,
+      pendingCount: await this.countPendingMessages(deviceId, now),
+      config: deviceConfigFor(updatedDevice),
     }
   }
 }

@@ -1,0 +1,66 @@
+// The dashboard proxies registration through its own server, so the request the
+// API sees comes from that server rather than from the visitor. The browser's
+// user agent and address are therefore forwarded in the body, and these helpers
+// decide which value to trust.
+//
+// Body values are attacker controlled. They are used only to label analytics,
+// never for authorisation or rate limiting, and are bounded here so a hostile
+// payload cannot grow a document or forge a log line.
+
+import { isIP } from 'net'
+import { cleanCountry, resolveClientAddress } from './client-address'
+
+const MAX_USER_AGENT = 512
+
+// Control characters, which would otherwise let a forwarded value inject
+// newlines into logs.
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g
+
+export type ClientContextInput = {
+  userAgent?: unknown
+  ip?: unknown
+  country?: unknown
+}
+
+export type RequestContext = {
+  ip?: string
+  userAgent?: string
+  country?: string
+}
+
+function cleanUserAgent(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.replace(CONTROL_CHARACTERS, '').trim()
+  return trimmed ? trimmed.slice(0, MAX_USER_AGENT) : undefined
+}
+
+function cleanIp(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  // Parsed, not pattern matched. An allowlist of characters would accept
+  // "::::" and "203.0.113.999", and passing a malformed address to an ad
+  // platform is worse than passing none, which is the whole point of
+  // forwarding the real one.
+  return isIP(trimmed) ? trimmed : undefined
+}
+
+export function resolveRequestContext(
+  client: ClientContextInput | undefined,
+  req?: { ip?: string; headers?: Record<string, any> },
+): RequestContext {
+  const forwardedUserAgent = cleanUserAgent(client?.userAgent)
+  const forwardedIp = cleanIp(client?.ip)
+  const forwardedCountry = cleanCountry(client?.country)
+
+  // The proxy's own request describes the proxy, so its values only fill the
+  // gaps. For a call made straight to the API there is no proxy and the edge
+  // is the only source.
+  const edge = resolveClientAddress(req)
+
+  return {
+    userAgent:
+      forwardedUserAgent ?? cleanUserAgent(req?.headers?.['user-agent']),
+    ip: forwardedIp ?? edge.ip,
+    country: forwardedCountry ?? edge.country,
+  }
+}

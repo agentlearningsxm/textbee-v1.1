@@ -8,7 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.vernu.sms.ApiManagerKt
 import com.vernu.sms.AppConstants
 import com.vernu.sms.BuildConfig
-import com.vernu.sms.TextBeeUtils
+import com.vernu.sms.TextbeeUtils
 import com.vernu.sms.dtos.RegisterDeviceInputDTO
 import com.vernu.sms.helpers.SharedPreferenceHelper
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +34,7 @@ data class SettingsState(
     val appVersionName: String = BuildConfig.VERSION_NAME,
     val appVersionCode: Int = BuildConfig.VERSION_CODE,
     val isSavingDeviceName: Boolean = false,
+    val healthIssueCount: Int = 0,
     val snackbarMessage: String? = null
 )
 
@@ -76,7 +77,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         )
 
         val sims = try {
-            TextBeeUtils.getAvailableSimSlots(context).map { info ->
+            TextbeeUtils.getAvailableSimSlots(context).map { info ->
                 SimOption(
                     subscriptionId = info.subscriptionId,
                     displayName = "${info.carrierName} (SIM ${info.simSlotIndex + 1})"
@@ -96,10 +97,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 isStickyNotificationEnabled = isSticky,
                 smsSendDelaySeconds = smsDelay,
                 preferredSimSubscriptionId = preferredSim,
-                availableSims = sims
+                availableSims = sims,
+                healthIssueCount = DeviceHealthViewModel.issueCount(context)
             )
         }
     }
+
+    fun refresh() = loadSettings()
 
     fun setGatewayEnabled(enabled: Boolean) {
         val deviceId = _state.value.deviceId
@@ -114,12 +118,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                     SharedPreferenceHelper.setSharedPreferenceBoolean(
                         context, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, enabled
                     )
-                    _state.update { it.copy(isGatewayEnabled = enabled) }
+                    _state.update { it.copy(isGatewayEnabled = enabled, healthIssueCount = DeviceHealthViewModel.issueCount(context)) }
                     if (enabled) {
-                        TextBeeUtils.startStickyNotificationService(context)
+                        TextbeeUtils.startStickyNotificationService(context)
                         com.vernu.sms.helpers.HeartbeatManager.scheduleHeartbeat(context)
                     } else {
-                        TextBeeUtils.stopStickyNotificationService(context)
+                        TextbeeUtils.stopStickyNotificationService(context)
                         com.vernu.sms.helpers.HeartbeatManager.cancelHeartbeat(context)
                     }
                 } else {
@@ -127,7 +131,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(snackbarMessage = "Network error. Try again.") }
-                TextBeeUtils.logException(e, "Gateway toggle from settings failed")
+                TextbeeUtils.logException(e, "Gateway toggle from settings failed")
             }
         }
     }
@@ -144,13 +148,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             context, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, enabled
         )
         try {
-            if (enabled) TextBeeUtils.startStickyNotificationService(context)
-            else TextBeeUtils.stopStickyNotificationService(context)
+            if (enabled) TextbeeUtils.startStickyNotificationService(context)
+            else TextbeeUtils.stopStickyNotificationService(context)
         } catch (e: Exception) {
-            TextBeeUtils.logException(e, "Sticky notification toggle failed")
+            TextbeeUtils.logException(e, "Sticky notification toggle failed")
             _state.update { it.copy(snackbarMessage = "Could not start notification service") }
         }
-        _state.update { it.copy(isStickyNotificationEnabled = enabled) }
+        _state.update { it.copy(isStickyNotificationEnabled = enabled, healthIssueCount = DeviceHealthViewModel.issueCount(context)) }
     }
 
     fun setSmsSendDelay(seconds: Int) {
@@ -188,7 +192,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(snackbarMessage = "Network error. Try again.") }
-                TextBeeUtils.logException(e, "Save device name failed")
+                TextbeeUtils.logException(e, "Save device name failed")
             } finally {
                 _state.update { it.copy(isSavingDeviceName = false) }
             }
