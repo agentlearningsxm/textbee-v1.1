@@ -6,8 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
 const SELFHOSTED_APK_PATH = '/textbee-selfhosted.apk'
-const SELFHOSTED_APK_SIZE_BYTES = 20_320_203
-const SELFHOSTED_VERSION = '2.8.1'
+const SELFHOSTED_APK_SIZE_BYTES = 14_908_485
+const SELFHOSTED_VERSION = '2.9.0-selfhosted (build 22)'
 
 export default function DownloadPage() {
   const formatFileSize = (bytes: number) => {
@@ -45,7 +45,7 @@ export default function DownloadPage() {
                     TextBee Selfhosted App
                   </h2>
                   <p className='text-brand-100'>
-                    Pre-configured to connect to your private TextBee API.
+                    Connects to your private TextBee API. Requires your selected hollandsnieuwe SIM; other carriers are blocked.
                   </p>
                 </div>
                 <Button

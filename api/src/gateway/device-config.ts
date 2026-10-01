@@ -29,8 +29,8 @@ export function fleetDeviceConfig(): DeviceConfig {
     sendSchedulerV2Enabled: envBool('SEND_SCHEDULER_V2_ENABLED', true),
     recoveryPollEnabled: envBool('RECOVERY_POLL_ENABLED', false),
     updateNotificationsEnabled: envBool('UPDATE_NOTIFICATIONS_ENABLED', false),
-    latestVersionCode: envInt('LATEST_APP_VERSION_CODE', 19),
-    latestVersionName: process.env.LATEST_APP_VERSION_NAME?.trim() || '2.8.1',
+    latestVersionCode: envInt('LATEST_APP_VERSION_CODE', 22),
+    latestVersionName: process.env.LATEST_APP_VERSION_NAME?.trim() || '2.9.0-selfhosted',
   }
 }
 

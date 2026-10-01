@@ -11,12 +11,16 @@ describe('device config', () => {
     delete process.env.SEND_SCHEDULER_V2_ENABLED
     delete process.env.RECOVERY_POLL_ENABLED
     delete process.env.UPDATE_NOTIFICATIONS_ENABLED
+    delete process.env.LATEST_APP_VERSION_CODE
+    delete process.env.LATEST_APP_VERSION_NAME
 
     expect(fleetDeviceConfig()).toEqual(
       expect.objectContaining({
         sendSchedulerV2Enabled: true,
         recoveryPollEnabled: false,
         updateNotificationsEnabled: false,
+        latestVersionCode: 22,
+        latestVersionName: '2.9.0-selfhosted',
       }),
     )
   })
