@@ -20,6 +20,7 @@ android {
         targetSdk 35
         versionCode 21
         versionName "2.9.0"
+        buildConfigField "String", "REQUIRED_SMS_CARRIER", '""'
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -95,6 +96,8 @@ android {
             dimension "environment"
             applicationId "com.vernu.sms.selfhosted"
             versionName "2.9.0-selfhosted"
+            versionCode 22
+            buildConfigField "String", "REQUIRED_SMS_CARRIER", '"hollandsnieuwe"'
             buildConfigField "String", "API_BASE_URL", '"https://textbee.srv1093654.hstgr.cloud/api/v1/"'
             buildConfigField "String", "WEB_BASE_URL", '"https://textbee-cloud.vercel.app"'
             buildConfigField "String", "ENVIRONMENT", '"production"'

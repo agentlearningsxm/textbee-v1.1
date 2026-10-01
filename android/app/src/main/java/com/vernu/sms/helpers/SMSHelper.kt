@@ -8,6 +8,7 @@ import android.os.Build
 import android.telephony.SmsManager
 import android.util.Log
 import com.vernu.sms.AppConstants
+import com.vernu.sms.BuildConfig
 import com.vernu.sms.TextbeeUtils
 import com.vernu.sms.dtos.SMSDTO
 import com.vernu.sms.receivers.SMSStatusReceiver
@@ -22,6 +23,22 @@ data class SendTiming(
 object SMSHelper {
     private const val TAG = "SMSHelper"
 
+    fun resolveLockedSim(context: Context, requestedId: Int): Int? = try {
+        SimPolicy.resolve(
+            requestedId,
+            SharedPreferenceHelper.getSharedPreferenceInt(context, AppConstants.SHARED_PREFS_PREFERRED_SIM_KEY, -1),
+            TextbeeUtils.getAvailableSimSlots(context).map { it.subscriptionId to it.carrierName.toString() },
+            BuildConfig.REQUIRED_SMS_CARRIER
+        )
+    } catch (e: Exception) {
+        null
+    }
+
+    fun rejectSim(context: Context, smsId: String, smsBatchId: String, timing: SendTiming): Boolean {
+        reportSendingError(context, smsId, smsBatchId, "Required SMS carrier or selected SIM unavailable; no fallback permitted", timing)
+        return false
+    }
+
     @JvmStatic
     @JvmOverloads
     fun sendSMS(
@@ -32,6 +49,7 @@ object SMSHelper {
         context: Context,
         timing: SendTiming = SendTiming()
     ): Boolean {
+        if (BuildConfig.REQUIRED_SMS_CARRIER.isNotEmpty()) return rejectSim(context, smsId, smsBatchId, timing)
         if (!TextbeeUtils.isPermissionGranted(context, Manifest.permission.SEND_SMS)) {
             Log.e(TAG, "SMS permission not granted. Unable to send SMS.")
             reportPermissionError(context, smsId, smsBatchId, timing)
@@ -72,6 +90,9 @@ object SMSHelper {
         context: Context,
         timing: SendTiming = SendTiming()
     ): Boolean {
+        if (BuildConfig.REQUIRED_SMS_CARRIER.isNotEmpty() &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1 || resolveLockedSim(context, simSubscriptionId) != simSubscriptionId)
+        ) return rejectSim(context, smsId, smsBatchId, timing)
         if (!TextbeeUtils.isPermissionGranted(context, Manifest.permission.SEND_SMS) ||
             !TextbeeUtils.isPermissionGranted(context, Manifest.permission.READ_PHONE_STATE)
         ) {

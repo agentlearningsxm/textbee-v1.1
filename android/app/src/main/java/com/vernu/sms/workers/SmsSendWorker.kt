@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.work.*
 import com.google.common.util.concurrent.ListenableFuture
 import com.vernu.sms.AppConstants
+import com.vernu.sms.BuildConfig
 import com.vernu.sms.R
 import com.vernu.sms.TextbeeUtils
 import com.vernu.sms.database.SmsDedupeStore
@@ -155,6 +156,11 @@ class SmsSendWorker(context: Context, workerParams: WorkerParameters) : Worker(c
         }
 
         val resolvedSim = resolveSim(context, simSubscriptionId)
+        if (BuildConfig.REQUIRED_SMS_CARRIER.isNotEmpty() && resolvedSim == null) {
+            SMSHelper.rejectSim(context, smsId, smsBatchId ?: "", SendTiming(pushReceivedAt))
+            DeviceLog.log(context, "send_failed", "required SIM unavailable; no fallback", smsId)
+            return if (legacy) Result.success() else Result.failure()
+        }
 
         // Jobs due at different times can still run together after the phone
         // wakes, so the gap is enforced once more right before the radio call
@@ -233,6 +239,7 @@ class SmsSendWorker(context: Context, workerParams: WorkerParameters) : Worker(c
     }
 
     private fun resolveSim(context: Context, backendSimId: Int): Int? {
+        if (BuildConfig.REQUIRED_SMS_CARRIER.isNotEmpty()) return SMSHelper.resolveLockedSim(context, backendSimId)
         if (backendSimId != -1 && TextbeeUtils.isValidSubscriptionId(context, backendSimId)) {
             Log.d(TAG, "Using backend-provided SIM subscription ID: $backendSimId")
             return backendSimId

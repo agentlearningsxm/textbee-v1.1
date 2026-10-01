@@ -39,6 +39,7 @@ The app now supports three build variants:
 - `SafeFirebase` disables Firebase for this flavor and its manifest removes `FirebaseInitProvider`; replacing the placeholder alone does not enable push.
 - Sending uses the owner API's pending-SMS polling transport, with the same `SmsSendWorker` pacing, SIM selection and persistent deduplication used by v2.9 push/recovery. Keep background notification enabled for polling; existing preferences are retained on upgrade.
 - Both API clients send `X-Textbee-Transport: poll` only in the selfhosted flavor, so authenticated heartbeats can select polling even if the device retains a historical FCM token. Prod/dev omit this hint and retain their push transport.
+- The owner's selfhosted build (versionCode 22) requires the app's selected default SIM to be active and report carrier `hollandsnieuwe`. An explicit API subscription ID must match that selected SIM. Missing/stale selection, another carrier, or a conflicting request reports failure without falling back to the phone's default SIM; the SMS helper checks again before sending. Select the carrier in app Settings before sending. Current verified mapping is physical SIM 2 / subscription ID 3 for hollandsnieuwe; subscription ID 2 is Odido. IDs are checked against the active carrier rather than hardcoded. This owner-specific restriction also applies to other users of this selfhosted build; change its `REQUIRED_SMS_CARRIER` build setting for a different deployment. Dev/prod keep their existing SIM behavior and versionCode 21.
 
 ### 2. API Configuration
 
