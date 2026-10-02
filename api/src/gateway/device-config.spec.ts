@@ -19,7 +19,7 @@ describe('device config', () => {
         sendSchedulerV2Enabled: true,
         recoveryPollEnabled: false,
         updateNotificationsEnabled: false,
-        latestVersionCode: 22,
+        latestVersionCode: 24,
         latestVersionName: '2.9.0-selfhosted',
       }),
     )
