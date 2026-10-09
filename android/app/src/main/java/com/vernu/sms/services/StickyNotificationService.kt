@@ -113,13 +113,6 @@ class StickyNotificationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "onStartCommand - startId: $startId, action: ${intent?.action}")
 
-        if (!shouldRun(applicationContext)) {
-            Log.i(TAG, "Gateway or sticky notification disabled, stopping service")
-            stopPolling()
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
         try {
             val notification = createNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -136,6 +129,16 @@ class StickyNotificationService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "Cannot start foreground service: ${e.message}")
             schedulePoll(this) // retry later instead of ending the poll chain
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // Checked after startForeground: a startForegroundService start that stops
+        // without it crashes, even if the user switched off in the meantime.
+        if (!shouldRun(applicationContext)) {
+            Log.i(TAG, "Gateway or sticky notification disabled, stopping service")
+            stopPolling()
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
