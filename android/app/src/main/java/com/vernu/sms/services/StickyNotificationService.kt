@@ -49,6 +49,15 @@ class StickyNotificationService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        // The poll chain runs only while both the gateway and its notification are on.
+        @JvmStatic
+        fun shouldRun(context: Context): Boolean =
+            SharedPreferenceHelper.getSharedPreferenceBoolean(
+                context, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false,
+            ) && SharedPreferenceHelper.getSharedPreferenceBoolean(
+                context, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, false,
+            )
+
         // Also called by AlarmReceiver when it cannot start the service, so one
         // rejected start does not end the poll chain.
         @JvmStatic
@@ -104,13 +113,8 @@ class StickyNotificationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "onStartCommand - startId: $startId, action: ${intent?.action}")
 
-        val stickyNotificationEnabled = SharedPreferenceHelper.getSharedPreferenceBoolean(
-            applicationContext,
-            AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY,
-            false,
-        )
-        if (!stickyNotificationEnabled) {
-            Log.i(TAG, "Sticky notification disabled, stopping service")
+        if (!shouldRun(applicationContext)) {
+            Log.i(TAG, "Gateway or sticky notification disabled, stopping service")
             stopPolling()
             stopSelf()
             return START_NOT_STICKY
@@ -152,12 +156,9 @@ class StickyNotificationService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         // Keep a retry alarm armed (e.g. after a refused foreground start) unless the
-        // user turned the gateway notification off; AlarmReceiver re-checks that too.
+        // user turned the gateway or its notification off; AlarmReceiver re-checks too.
         isPolling = false
-        val stillEnabled = SharedPreferenceHelper.getSharedPreferenceBoolean(
-            applicationContext, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false,
-        )
-        if (!stillEnabled) stopPolling()
+        if (!shouldRun(applicationContext)) stopPolling()
         releasePollWakeLock()
         Log.i(TAG, "StickyNotificationService destroyed")
     }

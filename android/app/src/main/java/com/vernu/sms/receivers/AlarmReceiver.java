@@ -6,8 +6,6 @@ import android.content.Intent;
 import android.os.Build;
 import android.util.Log;
 
-import com.vernu.sms.AppConstants;
-import com.vernu.sms.helpers.SharedPreferenceHelper;
 import com.vernu.sms.services.StickyNotificationService;
 
 /**
@@ -27,9 +25,8 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (ACTION_POLL_SMS.equals(action) || ACTION_RESTART_SERVICE.equals(action)) {
             Log.d(TAG, "Alarm received, action: " + action);
 
-            // A leftover alarm must neither start the service nor re-arm once the user turned it off.
-            if (!SharedPreferenceHelper.getSharedPreferenceBoolean(
-                    context, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false)) {
+            // A leftover alarm must neither start the service nor re-arm once the user turned the gateway off.
+            if (!StickyNotificationService.shouldRun(context)) {
                 return;
             }
 
