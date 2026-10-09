@@ -261,6 +261,15 @@ describe('GatewayService', () => {
       expect(result).toBeDefined()
     })
 
+    it('pins a device registered by a polling build to polling', async () => {
+      mockDeviceModel.findOne.mockResolvedValue(null)
+      mockDeviceModel.create.mockResolvedValue(mockDevice)
+
+      await service.registerDevice(mockDeviceInput, mockUser, true)
+
+      expect(mockDeviceModel.create).toHaveBeenCalledWith(expect.objectContaining({ smsTransport: 'poll' }))
+    })
+
     it('should default a new device to enabled when the client omits enabled', async () => {
       // 2.8+ clients register without an `enabled` field; the server must
       // still create the device enabled so it works without a manual toggle.
@@ -1267,6 +1276,26 @@ describe('GatewayService', () => {
       const result = await service.sendSMS(mockDeviceId, mockSmsInput)
 
       expect(result.success).toBe(true)
+    })
+
+    it('still succeeds when the nudge push throws synchronously', async () => {
+      mockDeviceModel.findById.mockResolvedValue({ ...mockDevice, smsTransport: 'poll' })
+      ;(firebaseAdmin.messaging().send as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('invalid message')
+      })
+
+      const result = await service.sendSMS(mockDeviceId, mockSmsInput)
+
+      expect(result.success).toBe(true)
+    })
+
+    it('does not nudge a device whose push token was invalidated', async () => {
+      mockDeviceModel.findById.mockResolvedValue({ ...mockDevice, smsTransport: 'poll', fcmTokenInvalidatedAt: new Date() })
+      ;(firebaseAdmin.messaging().send as jest.Mock).mockClear()
+
+      await service.sendSMS(mockDeviceId, mockSmsInput)
+
+      expect(firebaseAdmin.messaging().send).not.toHaveBeenCalled()
     })
 
     it('sends normally for a device that is not listed', async () => {

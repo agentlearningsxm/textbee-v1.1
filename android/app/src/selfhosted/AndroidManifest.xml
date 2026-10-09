@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application>
+        <!-- Push is used only to wake the poll; collect no analytics. -->
+        <meta-data android:name="firebase_analytics_collection_deactivated" android:value="true" />
         <provider
             android:name="com.google.firebase.provider.FirebaseInitProvider"
             android:authorities="${applicationId}.firebaseinitprovider"

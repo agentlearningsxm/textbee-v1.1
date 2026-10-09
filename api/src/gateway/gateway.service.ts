@@ -87,12 +87,18 @@ export class GatewayService {
   // A polling device with a push token gets a content-free nudge so it polls
   // now instead of at its next interval. The message stays pending and only
   // the poll claims it, so a failed or lost nudge changes nothing.
-  private wakePollingDevice(device: { fcmToken?: string }): void {
-    if (!device.fcmToken || !this.isFirebaseAvailable()) return
-    firebaseAdmin
-      .messaging()
-      .send({ data: { type: 'poll_now' }, token: device.fcmToken, android: pollNowAndroidConfig() })
-      .catch((e) => console.log(`[GatewayService] poll_now push failed: ${e?.message}`))
+  private wakePollingDevice(device: { fcmToken?: string; fcmTokenInvalidatedAt?: Date }): void {
+    if (!device.fcmToken || device.fcmTokenInvalidatedAt || !this.isFirebaseAvailable()) return
+    const failed = (e) => console.log(`[GatewayService] poll_now push failed: ${e?.message}`)
+    try {
+      // send() validates synchronously, so guard both the throw and the rejection
+      firebaseAdmin
+        .messaging()
+        .send({ data: { type: 'poll_now' }, token: device.fcmToken, android: pollNowAndroidConfig() })
+        .catch(failed)
+    } catch (e) {
+      failed(e)
+    }
   }
 
   private isFirebaseAvailable(): boolean {
@@ -178,6 +184,7 @@ export class GatewayService {
   async registerDevice(
     input: RegisterDeviceInputDTO,
     user: User,
+    pollOnly = false,
   ): Promise<any> {
     // Mongoose 9.6's strict types collide on the reserved `model` field name
     // (it expects Mongoose's `Model<any>` shape, not the device's `model`
@@ -225,6 +232,9 @@ export class GatewayService {
       deviceData.fcmTokenInvalidatedAt = undefined
       deviceData.fcmTokenInvalidReason = undefined
     }
+    // A polling build now also has a push token. Pin it to polling from the
+    // start so its messages never take the push-delivery path.
+    if (pollOnly) deviceData.smsTransport = 'poll'
 
     if (device && device.appVersionCode <= 11) {
       // re-enable path: updateDevice enforces the device limit on the

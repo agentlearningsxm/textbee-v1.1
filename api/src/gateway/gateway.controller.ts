@@ -122,10 +122,15 @@ export class GatewayController {
   })
   @ApiResponse(UNAUTHORIZED_RESPONSE)
   @Post('/devices')
-  async registerDevice(@Body() input: RegisterDeviceInputDTO, @Request() req) {
+  async registerDevice(
+    @Body() input: RegisterDeviceInputDTO,
+    @Request() req,
+    @Headers('x-textbee-transport') transport?: string,
+  ) {
     const data = await this.gatewayService.registerDevice(
       pickDeviceWritableFields(input),
       req.user,
+      transport === 'poll',
     )
     return { data }
   }
