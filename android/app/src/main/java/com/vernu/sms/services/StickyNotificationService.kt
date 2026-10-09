@@ -151,7 +151,13 @@ class StickyNotificationService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopPolling()
+        // Keep a retry alarm armed (e.g. after a refused foreground start) unless the
+        // user turned the gateway notification off; AlarmReceiver re-checks that too.
+        isPolling = false
+        val stillEnabled = SharedPreferenceHelper.getSharedPreferenceBoolean(
+            applicationContext, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false,
+        )
+        if (!stillEnabled) stopPolling()
         releasePollWakeLock()
         Log.i(TAG, "StickyNotificationService destroyed")
     }

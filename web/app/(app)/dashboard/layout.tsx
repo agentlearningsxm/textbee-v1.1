@@ -10,7 +10,6 @@ import UpdateAppNotificationBar from './(components)/devices/update-app-notifica
 import VerifyEmailAlert from './(components)/alerts/verify-email-alert'
 import PastDueBillingAlert from './(components)/alerts/past-due-billing-alert'
 import JoinDiscordBanner from './(components)/alerts/join-discord-banner'
-import { SurveyModal } from '@/components/shared/survey-modal'
 import { JoinCommunityModal } from '@/components/shared/join-community-modal'
 import Footer from '@/components/shared/footer'
 import ThemeToggle from '@/components/shared/theme-toggle'
@@ -123,7 +122,6 @@ export default function DashboardLayout({
         </div>
       </nav>
 
-      <SurveyModal />
       <UpdateAppModal />
       <JoinCommunityModal />
     </div>
