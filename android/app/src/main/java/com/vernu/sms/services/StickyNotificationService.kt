@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -27,6 +28,7 @@ import com.vernu.sms.workers.SmsSendWorker
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import java.util.concurrent.TimeUnit
 
 class StickyNotificationService : Service() {
     companion object {
@@ -37,12 +39,57 @@ class StickyNotificationService : Service() {
         private const val AUTH_ERROR_NOTIFICATION_ID = 2
         private const val POLLING_INTERVAL_MS = 15_000L
         private const val MAX_CONSECUTIVE_AUTH_FAILURES = 5
+        private const val POLL_WAKE_LOCK_TIMEOUT_MS = 30_000L
+        private const val POLL_CALL_TIMEOUT_SECONDS = 25L
+
+        private fun pollPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+            context,
+            0,
+            Intent(context, AlarmReceiver::class.java).apply { action = AlarmReceiver.ACTION_POLL_SMS },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        // Also called by AlarmReceiver when it cannot start the service, so one
+        // rejected start does not end the poll chain.
+        @JvmStatic
+        fun schedulePoll(context: Context) {
+            val manager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val pendingIntent = pollPendingIntent(context)
+            val triggerAtMillis = SystemClock.elapsedRealtime() + POLLING_INTERVAL_MS
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !manager.canScheduleExactAlarms()) {
+                manager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent,
+                )
+                Log.w(TAG, "Exact alarms not allowed, using inexact alarm")
+                return
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                manager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent,
+                )
+            } else {
+                manager.setExact(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent,
+                )
+            }
+        }
     }
 
-    private var alarmManager: AlarmManager? = null
-    private var alarmPendingIntent: PendingIntent? = null
     private var isPolling = false
     private var pollInFlight = false
+    private val pollWakeLock by lazy {
+        (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "textbee:poll")
+            .apply { setReferenceCounted(false) }
+    }
 
     override fun onBind(intent: Intent?): IBinder? {
         Log.i(TAG, "Service onBind ${intent?.action}")
@@ -52,7 +99,6 @@ class StickyNotificationService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "Service onCreate")
-        alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -70,32 +116,14 @@ class StickyNotificationService : Service() {
             return START_NOT_STICKY
         }
 
-        val lastTimeoutAt = SharedPreferenceHelper.getSharedPreferenceLong(
-            applicationContext,
-            AppConstants.SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY,
-            0L,
-        )
-        if (lastTimeoutAt > 0) {
-            val elapsed = System.currentTimeMillis() - lastTimeoutAt
-            if (elapsed < AppConstants.DATASYNC_TIMEOUT_COOLDOWN_MS) {
-                Log.w(TAG, "In dataSync timeout cooldown; not starting foreground service")
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            SharedPreferenceHelper.setSharedPreferenceLong(
-                applicationContext,
-                AppConstants.SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY,
-                0L,
-            )
-        }
-
         try {
             val notification = createNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // remoteMessaging has no daily limit; dataSync stops after 6 hours a day on Android 15+.
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
                 )
             } else {
                 startForeground(NOTIFICATION_ID, notification)
@@ -103,6 +131,7 @@ class StickyNotificationService : Service() {
             Log.i(TAG, "Started foreground service with sticky notification")
         } catch (e: Exception) {
             Log.w(TAG, "Cannot start foreground service: ${e.message}")
+            schedulePoll(this) // retry later instead of ending the poll chain
             stopSelf()
             return START_NOT_STICKY
         }
@@ -123,100 +152,23 @@ class StickyNotificationService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopPolling()
+        releasePollWakeLock()
         Log.i(TAG, "StickyNotificationService destroyed")
     }
 
-    override fun onTimeout(startId: Int) {
-        handleServiceTimeout(startId)
-    }
-
-    override fun onTimeout(startId: Int, fgsType: Int) {
-        handleServiceTimeout(startId)
-    }
-
-    private fun handleServiceTimeout(startId: Int) {
-        Log.w(TAG, "Service timeout reached. Stopping gracefully and scheduling delayed restart.")
-        SharedPreferenceHelper.setSharedPreferenceLong(
-            applicationContext,
-            AppConstants.SHARED_PREFS_DATASYNC_TIMEOUT_AT_KEY,
-            System.currentTimeMillis(),
-        )
-        stopPolling()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        scheduleRestartAfterTimeout()
-        stopSelf(startId)
-    }
-
     private fun scheduleNextPoll() {
-        if (!isPolling) return
-
-        val intent = Intent(this, AlarmReceiver::class.java).apply {
-            action = AlarmReceiver.ACTION_POLL_SMS
-        }
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        alarmPendingIntent = pendingIntent
-        val triggerAtMillis = SystemClock.elapsedRealtime() + POLLING_INTERVAL_MS
-        val manager = alarmManager ?: return
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !manager.canScheduleExactAlarms()) {
-            manager.setAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAtMillis,
-                pendingIntent,
-            )
-            Log.w(TAG, "Exact alarms not allowed, using inexact alarm")
-            return
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            manager.setExactAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAtMillis,
-                pendingIntent,
-            )
-        } else {
-            manager.setExact(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAtMillis,
-                pendingIntent,
-            )
-        }
+        if (isPolling) schedulePoll(this)
     }
 
     private fun stopPolling() {
         isPolling = false
-        alarmPendingIntent?.let { alarmManager?.cancel(it) }
-        alarmPendingIntent = null
-    }
-
-    private fun scheduleRestartAfterTimeout() {
-        try {
-            val restartIntent = Intent(this, AlarmReceiver::class.java).apply {
-                action = AlarmReceiver.ACTION_RESTART_SERVICE
-            }
-            val restartPendingIntent = PendingIntent.getBroadcast(
-                this,
-                1,
-                restartIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            val restartTime = SystemClock.elapsedRealtime() + AppConstants.DATASYNC_TIMEOUT_COOLDOWN_MS
-            alarmManager?.setAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                restartTime,
-                restartPendingIntent,
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to schedule delayed restart: ${e.message}")
-        }
+        (getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pollPendingIntent(this))
     }
 
     private fun pollForPendingSMS() {
+        // Arm the next alarm first. If the phone sleeps during the request, the
+        // chain must not depend on a reply arriving.
+        scheduleNextPoll()
         if (pollInFlight) return
         val deviceId = SharedPreferenceHelper.getSharedPreferenceString(
             applicationContext,
@@ -236,46 +188,72 @@ class StickyNotificationService : Service() {
 
         if (deviceId.isEmpty() || apiKey.isEmpty() || !gatewayEnabled) {
             Log.d(TAG, "Skipping poll - device not configured or gateway disabled")
-            scheduleNextPoll()
             return
         }
 
         pollInFlight = true
-        ApiManager.getApiService().getPendingSMS(deviceId, apiKey, 10)
-            .enqueue(object : Callback<PendingSMSResponseDTO> {
-                override fun onResponse(
-                    call: Call<PendingSMSResponseDTO>,
-                    response: Response<PendingSMSResponseDTO>,
-                ) {
-                    pollInFlight = false
-                    if (!isPolling) return
-                    val body = response.body()
-                    val data = body?.data
+        // Keep the CPU awake until the reply is handled; the alarm's own wake
+        // ends as soon as AlarmReceiver returns.
+        pollWakeLock.acquire(POLL_WAKE_LOCK_TIMEOUT_MS)
+        try {
+            enqueuePoll(deviceId, apiKey)
+        } catch (e: Exception) {
+            // Otherwise pollInFlight would stay set and every later poll would be skipped.
+            pollInFlight = false
+            releasePollWakeLock()
+            Log.e(TAG, "Could not start pending SMS poll: ${e.message}")
+        }
+    }
+
+    private fun enqueuePoll(deviceId: String, apiKey: String) {
+        val call = ApiManager.getApiService().getPendingSMS(deviceId, apiKey, 10)
+        // Bound the whole call so a stalled request cannot keep pollInFlight set.
+        call.timeout().timeout(POLL_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        call.enqueue(object : Callback<PendingSMSResponseDTO> {
+            override fun onResponse(
+                call: Call<PendingSMSResponseDTO>,
+                response: Response<PendingSMSResponseDTO>,
+            ) {
+                pollInFlight = false
+                try {
+                    val data = response.body()?.data
                     if (!response.isSuccessful || data == null) {
                         Log.e(TAG, "Failed to fetch pending SMS: ${response.code()}")
-                        if (response.code() == 401 || response.code() == 403) {
+                        if (isPolling && (response.code() == 401 || response.code() == 403)) {
                             val consecutiveAuthFailures = incrementConsecutiveAuthFailures()
                             if (consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) {
                                 stopPolling()
                                 showAuthErrorNotification()
-                                return
                             }
                         }
-                        scheduleNextPoll()
                         return
                     }
 
                     resetConsecutiveAuthFailures()
-                    data.messages?.forEach { sendSMS(it) }
-                    scheduleNextPoll()
+                    // The server already marked these dispatched, so hand them
+                    // over even if polling stopped while the request was out.
+                    data.messages?.forEach {
+                        try {
+                            sendSMS(it)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to queue polled SMS ${it?.smsId}: ${e.message}")
+                        }
+                    }
+                } finally {
+                    releasePollWakeLock()
                 }
+            }
 
-                override fun onFailure(call: Call<PendingSMSResponseDTO>, t: Throwable) {
-                    pollInFlight = false
-                    Log.e(TAG, "Error polling for pending SMS: ${t.message}")
-                    scheduleNextPoll()
-                }
-            })
+            override fun onFailure(call: Call<PendingSMSResponseDTO>, t: Throwable) {
+                pollInFlight = false
+                Log.e(TAG, "Error polling for pending SMS: ${t.message}")
+                releasePollWakeLock()
+            }
+        })
+    }
+
+    private fun releasePollWakeLock() {
+        if (pollWakeLock.isHeld) pollWakeLock.release()
     }
 
     private fun incrementConsecutiveAuthFailures(): Int {

@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.os.Build;
 import android.util.Log;
 
+import com.vernu.sms.AppConstants;
+import com.vernu.sms.helpers.SharedPreferenceHelper;
 import com.vernu.sms.services.StickyNotificationService;
 
 /**
@@ -25,7 +27,13 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (ACTION_POLL_SMS.equals(action) || ACTION_RESTART_SERVICE.equals(action)) {
             Log.d(TAG, "Alarm received, action: " + action);
 
-            // Send intent to service to poll now (or restart after timeout)
+            // A leftover alarm must neither start the service nor re-arm once the user turned it off.
+            if (!SharedPreferenceHelper.getSharedPreferenceBoolean(
+                    context, AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY, false)) {
+                return;
+            }
+
+            // Send intent to service to poll now
             Intent serviceIntent = new Intent(context, StickyNotificationService.class);
             serviceIntent.setAction(ACTION_POLL_SMS);
 
@@ -38,6 +46,8 @@ public class AlarmReceiver extends BroadcastReceiver {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start service: " + e.getMessage());
+                // The service re-arms the alarm only when it runs; keep trying.
+                StickyNotificationService.schedulePoll(context);
             }
         }
     }

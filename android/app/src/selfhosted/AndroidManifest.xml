@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Sideloaded only (Play restricts both). Polling is this flavor's only background
+         path: USE_EXACT_ALARM is granted at install so the 15 second poll is not deferred,
+         and the battery exemption can be asked for with one tap. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application>
         <provider
             android:name="com.google.firebase.provider.FirebaseInitProvider"

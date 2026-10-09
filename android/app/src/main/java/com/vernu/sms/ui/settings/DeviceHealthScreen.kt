@@ -106,7 +106,13 @@ fun DeviceHealthScreen(
                                 arrayOf("android.permission.POST_NOTIFICATIONS")
                             )
                             HealthAction.OPEN_BATTERY_SETTINGS -> try {
-                                context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                // One-tap "Allow" dialog when the build declares the permission (selfhosted); otherwise the full list.
+                                val canAsk = context.checkSelfPermission(Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) ==
+                                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                                context.startActivity(
+                                    if (canAsk) Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+                                    else Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                )
                             } catch (e: Exception) {
                                 openAppSettings()
                             }

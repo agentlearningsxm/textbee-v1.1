@@ -56,12 +56,18 @@ public class TextbeeUtils {
         
         if (stickyNotificationEnabled) {
             Intent notificationIntent = new Intent(context, StickyNotificationService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(notificationIntent);
-            } else {
-                context.startService(notificationIntent);
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(notificationIntent);
+                } else {
+                    context.startService(notificationIntent);
+                }
+                Log.i(TAG, "Starting sticky notification service");
+            } catch (Exception e) {
+                // A background start can be refused; the poll alarm keeps retrying.
+                Log.w(TAG, "Could not start sticky notification service: " + e.getMessage());
+                StickyNotificationService.schedulePoll(context);
             }
-            Log.i(TAG, "Starting sticky notification service");
         } else {
             Log.i(TAG, "Sticky notification disabled by user, not starting service");
         }
