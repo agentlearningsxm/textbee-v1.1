@@ -6,12 +6,15 @@ import android.util.Log;
 import androidx.work.Configuration;
 import androidx.work.WorkManager;
 
+import com.vernu.sms.firebase.SafeFirebase;
+
 public class SMSGatewayApplication extends Application implements Configuration.Provider {
     private static final String TAG = "SMSGatewayApplication";
     
     @Override
     public void onCreate() {
         super.onCreate();
+        SafeFirebase.init(this);
         
         // Initialize WorkManager early to ensure it's ready for background work
         // This is important for background tasks like heartbeat

@@ -41,6 +41,12 @@ class FCMService : FirebaseMessagingService() {
 
         try {
             val messageType = remoteMessage.data["type"]
+            if (messageType == "poll_now") {
+                // Content-free nudge from the server: poll at once instead of at the next interval.
+                DeviceLog.log(this, "push_received", "poll now")
+                TextbeeUtils.startStickyNotificationService(this)
+                return
+            }
             if (messageType == "heartbeat_check") {
                 DeviceLog.log(this, "push_received", "heartbeat check")
                 handleHeartbeatCheck()

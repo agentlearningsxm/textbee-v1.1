@@ -51,7 +51,7 @@ import {
 } from './status-report-input'
 import { toDirection, toStoredType } from './message-direction'
 import { ParsedMessageQuery } from './message-query'
-import { smsAndroidConfig } from './fcm-push-options'
+import { pollNowAndroidConfig, smsAndroidConfig } from './fcm-push-options'
 import {
   FCM_SEND_SKIPPED_ERROR_CODE,
   shouldSkipFcmSend,
@@ -84,6 +84,17 @@ export class GatewayService {
   /**
    * Check if Firebase is properly configured and available
    */
+  // A polling device with a push token gets a content-free nudge so it polls
+  // now instead of at its next interval. The message stays pending and only
+  // the poll claims it, so a failed or lost nudge changes nothing.
+  private wakePollingDevice(device: { fcmToken?: string }): void {
+    if (!device.fcmToken || !this.isFirebaseAvailable()) return
+    firebaseAdmin
+      .messaging()
+      .send({ data: { type: 'poll_now' }, token: device.fcmToken, android: pollNowAndroidConfig() })
+      .catch((e) => console.log(`[GatewayService] poll_now push failed: ${e?.message}`))
+  }
+
   private isFirebaseAvailable(): boolean {
     try {
       const apps = firebaseAdmin.apps
@@ -672,6 +683,7 @@ export class GatewayService {
 
     // Poll-only devices must never enter the FCM worker, which would fail them.
     if (device.smsTransport === 'poll' || !device.fcmToken || !this.isFirebaseAvailable()) {
+      this.wakePollingDevice(device)
       return {
         success: true,
         message: 'SMS saved for device polling',
@@ -1009,6 +1021,7 @@ export class GatewayService {
     }
 
     if (device.smsTransport === 'poll' || !device.fcmToken || !this.isFirebaseAvailable()) {
+      this.wakePollingDevice(device)
       return {
         success: true,
         message: 'Bulk SMS saved for device polling',

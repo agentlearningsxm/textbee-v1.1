@@ -4,16 +4,18 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.util.Log;
 
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.crashlytics.FirebaseCrashlytics;
 import com.google.firebase.messaging.FirebaseMessaging;
-import com.vernu.sms.BuildConfig;
 
 import java.util.Map;
 
 public final class SafeFirebase {
     private static final String TAG = "SafeFirebase";
-    private static final String SELFHOSTED_FLAVOR = "selfhosted";
     private static final String PLACEHOLDER_API_KEY = "placeholder-selfhosted-build-only";
+    // Set once by init(); selfhosted builds carry a real config only when the
+    // private google-services.json was supplied at build time.
+    private static volatile boolean enabled = false;
 
     private SafeFirebase() {
     }
@@ -22,11 +24,21 @@ public final class SafeFirebase {
         void onToken(String token);
     }
 
-    public static boolean isFirebaseEnabled(Context context) {
-        if (SELFHOSTED_FLAVOR.equalsIgnoreCase(BuildConfig.FLAVOR)) {
-            return false;
+    /** Call from Application.onCreate. The selfhosted manifest removes Firebase's auto-init provider. */
+    public static void init(Context context) {
+        if (hasPlaceholderFirebaseConfig(context)) {
+            Log.i(TAG, "Placeholder Firebase config; push disabled, polling only");
+            return;
         }
-        return !hasPlaceholderFirebaseConfig(context);
+        try {
+            enabled = FirebaseApp.initializeApp(context) != null;
+        } catch (Exception e) {
+            Log.w(TAG, "Firebase init failed; polling only", e);
+        }
+    }
+
+    public static boolean isFirebaseEnabled(Context context) {
+        return enabled;
     }
 
     public static void getFcmToken(Context context, FcmTokenCallback callback) {

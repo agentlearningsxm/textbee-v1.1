@@ -43,6 +43,11 @@ export function smsAndroidConfig(
   return { priority: 'high', ttl: Math.min(ttl, FCM_MAX_TTL_SECONDS * 1000) }
 }
 
+// A poll_now nudge carries no message, so a late one is useless after a few minutes.
+export function pollNowAndroidConfig(): AndroidConfig {
+  return { priority: 'high', ttl: 5 * 60 * 1000, collapseKey: 'poll_now' }
+}
+
 export function heartbeatAndroidConfig(): AndroidConfig {
   return {
     priority: 'high',

@@ -28,6 +28,7 @@ jest.mock('firebase-admin', () => ({
   apps: [{ name: '[DEFAULT]' }],
   messaging: jest.fn().mockReturnValue({
     sendEach: jest.fn(),
+    send: jest.fn().mockResolvedValue('message-id'),
   }),
 }))
 
@@ -1235,6 +1236,37 @@ describe('GatewayService', () => {
       } finally {
         delete process.env.FCM_SEND_SKIP_USER_IDS
       }
+    })
+
+    it('nudges a polling device with a push token and leaves the message pending', async () => {
+      mockDeviceModel.findById.mockResolvedValue({ ...mockDevice, smsTransport: 'poll' })
+      ;(firebaseAdmin.messaging().send as jest.Mock).mockClear()
+
+      const result = await service.sendSMS(mockDeviceId, mockSmsInput)
+
+      expect(result.message).toBe('SMS saved for device polling')
+      expect(firebaseAdmin.messaging().sendEach).not.toHaveBeenCalled()
+      expect(firebaseAdmin.messaging().send).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { type: 'poll_now' }, token: 'fcm-token' }),
+      )
+    })
+
+    it('does not nudge a polling device without a push token', async () => {
+      mockDeviceModel.findById.mockResolvedValue({ ...mockDevice, smsTransport: 'poll', fcmToken: undefined })
+      ;(firebaseAdmin.messaging().send as jest.Mock).mockClear()
+
+      await service.sendSMS(mockDeviceId, mockSmsInput)
+
+      expect(firebaseAdmin.messaging().send).not.toHaveBeenCalled()
+    })
+
+    it('still succeeds when the nudge push fails', async () => {
+      mockDeviceModel.findById.mockResolvedValue({ ...mockDevice, smsTransport: 'poll' })
+      ;(firebaseAdmin.messaging().send as jest.Mock).mockRejectedValueOnce(new Error('unregistered'))
+
+      const result = await service.sendSMS(mockDeviceId, mockSmsInput)
+
+      expect(result.success).toBe(true)
     })
 
     it('sends normally for a device that is not listed', async () => {
