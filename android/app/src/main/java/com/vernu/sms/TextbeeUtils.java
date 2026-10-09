@@ -47,14 +47,9 @@ public class TextbeeUtils {
             return;
         }
         
-        // Only start service if user has enabled sticky notification
-        boolean stickyNotificationEnabled = SharedPreferenceHelper.getSharedPreferenceBoolean(
-                context,
-                AppConstants.SHARED_PREFS_STICKY_NOTIFICATION_ENABLED_KEY,
-                false
-        );
-        
-        if (stickyNotificationEnabled) {
+        // Start only when the service will keep running: it stops itself without
+        // startForeground otherwise, which crashes a startForegroundService start.
+        if (StickyNotificationService.shouldRun(context)) {
             Intent notificationIntent = new Intent(context, StickyNotificationService.class);
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -69,7 +64,7 @@ public class TextbeeUtils {
                 StickyNotificationService.schedulePoll(context);
             }
         } else {
-            Log.i(TAG, "Sticky notification disabled by user, not starting service");
+            Log.i(TAG, "Gateway or sticky notification off, not starting service");
         }
     }
 

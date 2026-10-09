@@ -193,8 +193,9 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
                     Snackbar.make(view, "Gateway " + (isCheked ? "enabled" : "disabled"), Snackbar.LENGTH_LONG).show();
-                    SharedPreferenceHelper.setSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, isCheked);
                     boolean enabled = Boolean.TRUE.equals(Objects.requireNonNull(response.body()).data.get("enabled"));
+                    // Store what the server confirmed, so the service gate matches the switch.
+                    SharedPreferenceHelper.setSharedPreferenceBoolean(mContext, AppConstants.SHARED_PREFS_GATEWAY_ENABLED_KEY, enabled);
                     compoundButton.setChecked(enabled);
                     if (enabled) {
                         // Check if sticky notification is enabled
